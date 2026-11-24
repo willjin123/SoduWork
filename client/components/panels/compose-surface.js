@@ -61,8 +61,9 @@
         `<div class='wc-popover' id='cpWorkspacePop'><div class='wc-pop-title'>本次会话在哪儿工作</div>` +
           `<button class='wc-pop-row on' data-workspace='temp'>` + WorkComposer.icons.folder +
             `<span><b>默认工作区</b><i>在你设置的 SoduWork 工作根目录下隔离存放</i></span><b class='wc-check'>✓</b></button>` +
+          `<div class='cp-workspace-choices' id='cpWorkspaceChoices'></div>` +
           `<button class='wc-pop-row' data-workspace='pick'>` + WorkComposer.icons.folder +
-            `<span><b>选择现有文件夹</b><i>让 SoduWork 直接读取和修改这个文件夹</i></span></button></div>` +
+            `<span><b>选择其他文件夹…</b><i>让 SoduWork 直接读取和修改这个文件夹</i></span></button></div>` +
         `<div class='wc-popover align-center' id='cpPermissionPop'><div class='wc-pop-title'>本次会话权限</div>` +
           `<div class='cp-permission-state' id='cpPermissionState' hidden><p id='cpPermissionStatus' role='status'></p>` +
             `<button type='button' id='cpPermissionRetry'>重新检查</button></div>` +
@@ -570,8 +571,15 @@ function _paintSetup() {
       abilityButton.setAttribute('aria-busy', String(ctx._capLoading));
       abilityButton.setAttribute('aria-label', '本次会话能力：' + abilityLabel);
     }
-    document.querySelectorAll('#cpWorkspacePop [data-workspace]').forEach((row) =>
-      row.classList.toggle('on', (row.dataset.workspace === 'pick') === ctx._workspace.direct));
+    // A listed project or recent folder is marked itself; otherwise the generic row stands for the choice.
+    const sameDir = (a, b) => String(a || '').replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase() ===
+      String(b || '').replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
+    const listed = [...document.querySelectorAll('#cpWorkspaceChoices [data-dir]')].find((row) => ctx._workspace.direct &&
+      sameDir(row.dataset.dir, ctx._workspace.dir) && (row.dataset.workspace !== 'project' ||
+        row.dataset.projectId === String(ctx._workspace.sidebarProjectId || '')));
+    document.querySelectorAll('#cpWorkspacePop [data-workspace]').forEach((row) => row.classList.toggle('on',
+      row.dataset.workspace === 'temp' ? !ctx._workspace.direct
+        : row.dataset.workspace === 'pick' ? ctx._workspace.direct && !listed : row === listed));
     document.querySelectorAll('#cpPermissionPop [data-mode]').forEach((row) => {
       row.disabled = !accessSupported || Boolean(ctx._accessConsent?.busy());
       row.classList.toggle('on', accessSupported && row.dataset.mode === ctx._mode);

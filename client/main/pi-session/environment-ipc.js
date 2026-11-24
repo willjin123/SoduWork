@@ -68,7 +68,7 @@ function createConfiguration(getApp) {
   return { _conf, _saveConf, workDir, _defaultCwd, _newSessionCwd };
 }
 
-function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skillDirs, workDir, _saveConf, _conf }) {
+function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skillDirs, workDir, _saveConf, _conf, folderRegistry }) {
   /*
    * Probe policy and actual machine capability in the main process before opening a new
    * conversation; keep executable discovery and device identity out of the renderer.
@@ -167,12 +167,16 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
        hand-picked workspace) so changing the workspace does not jump back to the root. */
     const requested = typeof options?.defaultPath === 'string' ? options.defaultPath.trim() : '';
     const result = await dialog.showOpenDialog(win, require("../native-locale.cjs").dialogOptions({
-      title: '选择本次会话直接使用的文件夹',
+      // Adding an extra folder is a different choice from picking the working folder.
+      title: options?.purpose === 'extra' ? '选择要让本会话访问的文件夹'
+        : options?.purpose === 'project' ? '选择要添加到项目的文件夹' : '选择本次会话直接使用的文件夹',
       defaultPath: path.isAbsolute(requested) ? requested : workDir(app),
       properties: ['openDirectory', 'createDirectory'],
     }));
     if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
     const dir = result.filePaths[0];
+    // Only a native choice enters the folder registry; it never fails the pick itself.
+    try { await folderRegistry?.register(dir); } catch (_) { /* The folder can still be used for this choice. */ }
     return { ok: true, dir, name: path.basename(dir) };
   });
 

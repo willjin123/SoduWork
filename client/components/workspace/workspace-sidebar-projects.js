@@ -54,10 +54,19 @@
       status.textContent = message; global.petSay?.(message);
     };
     // Conversation views describe their working location from project membership.
+    let automationTimer = null;
     const announce = () => {
       if (typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
         global.dispatchEvent(new global.CustomEvent('soduwork-sidebar-projects-changed'));
       }
+      // Automations bound to a project run in the main process with that project's current folders.
+      const refresh = global.soduWorkAPI?.workspaceFolders?.refreshAutomations;
+      if (typeof refresh !== 'function' || !store) return;
+      clearTimeout(automationTimer);
+      automationTimer = setTimeout(() => {
+        const projects = (safe(() => store.get())?.projects || []).map(p => ({ id: p.id, name: p.name, folders: p.folders || [] }));
+        Promise.resolve(refresh(projects)).catch(() => {});
+      }, 400);
     };
     function state() {
       const options = global.WorkspaceSidebarState.accountOptions({ storage: localStorage, api: global.SoduWorkAPI });
@@ -111,12 +120,14 @@
         return true;
       }) === true;
     }
-    function openDialog(id, chatId) {
+    function openDialog(id, chatId, { folders: initialFolders = [] } = {}) {
       if (dialog) return;
       safe(() => {
         const beforeFocus = document.activeElement, currentScope = scope;
         const project = id ? state().get().projects.find(p => p.id === id) : null;
-        const folders = [...(project?.folders || [])];
+        // A new project may start from the folder the user is already working in.
+        const folders = project ? [...(project.folders || [])]
+          : initialFolders.filter(dir => typeof dir === 'string' && dir.trim()).slice(0, 1);
         dialog = document.createElement('dialog'); dialog.className = 'ws-project-dialog';
         dialog.setAttribute('aria-labelledby', 'wsProjectDialogTitle');
         dialog.innerHTML = '<form class="ws-project-form"><header><h2 id="wsProjectDialogTitle"></h2></header>' +
@@ -152,29 +163,92 @@
         const error = message => {
           const el = form.querySelector('.ws-project-error'); el.textContent = message; el.hidden = false;
         };
+        const samePath = (a, b) => String(a).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() ===
+          String(b).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+        // A saved default can be replaced but not dropped: new sessions would silently lose their folder.
+        const savedDefault = project?.folders?.[0] || '';
+        function addFolder(dir, name) {
+          if (!folders.some(p => samePath(p, dir))) folders.push(dir);
+          if (!input.value.trim()) input.value = name || dir.split(/[\\/]/).filter(Boolean).pop();
+          paintFolders(); input.focus();
+        }
+        async function browse() {
+          const api = global.soduWorkAPI?.conversationSession || global.soduWorkAPI?.piSession;
+          if (!api?.pickCwd) throw Error('请在桌面客户端选择文件夹');
+          const result = await api.pickCwd({ ...(folders[0] ? { defaultPath: folders[0] } : {}), purpose: 'project' }); // This picker does not change the global work directory.
+          if (!form.isConnected) return;
+          if (result?.ok && result.dir) addFolder(result.dir, result.name);
+          else if (!result?.canceled) throw Error(result?.reason || '未能选择文件夹，请重试');
+        }
         function paintFolders() {
           const container = form.querySelector('.ws-project-folders'); container.replaceChildren();
           folders.forEach((dir, index) => {
             const row = document.createElement('div'); row.className = 'ws-project-folder';
             const name = document.createElement('span'); name.textContent = dir.split(/[\\/]/).filter(Boolean).pop() || dir;
+            name.setAttribute('data-user-content', '');
             row.innerHTML = icon('folder'); row.appendChild(name); row.title = dir;
+            if (index === 0) {
+              const tag = document.createElement('small'); tag.className = 'ws-project-folder-default'; tag.textContent = '默认';
+              row.appendChild(tag);
+            } else {
+              const promote = button('ws-project-folder-promote', '设为默认 ' + name.textContent);
+              promote.textContent = '设为默认';
+              promote.onclick = () => {
+                if (project && !(global.confirm?.(global.SoduWorkI18n?.t('将“{name}”设为默认？只影响以后新建的会话，已有会话的工作文件夹不变。',
+                  '将“{name}”设为默认？只影响以后新建的会话，已有会话的工作文件夹不变。', { name: name.textContent })
+                  || ('将“' + name.textContent + '”设为默认？只影响以后新建的会话，已有会话的工作文件夹不变。')) ?? true)) return;
+                folders.splice(index, 1); folders.unshift(dir); paintFolders();
+              };
+              row.appendChild(promote);
+            }
             const remove = button('ws-project-icon-button', '移除文件夹 ' + name.textContent, icon('close'));
+            if (index === 0 && savedDefault && samePath(dir, savedDefault)) {
+              remove.disabled = true;
+              remove.title = '默认文件夹不能直接移除，请先把其他文件夹设为默认';
+              remove.setAttribute('aria-label', remove.title);
+            }
             remove.onclick = () => { folders.splice(index, 1); paintFolders(); }; row.appendChild(remove); container.appendChild(row);
+            if (index === 0 && /^(?:\\\\|\/\/)/.test(dir)) {
+              const hint = document.createElement('p'); hint.className = 'ws-project-folder-hint';
+              hint.textContent = '这是网络位置：断开后，用它新建的会话和它的工作区记忆都不可用。';
+              container.appendChild(hint);
+            }
           });
           const pick = button('ws-project-folder-add', '添加文件夹', icon('folder') + '<span>添加文件夹</span>');
           if (!folders.length) pick.classList.add('is-empty');
+          pick.setAttribute('aria-haspopup', 'menu');
           pick.onclick = async () => {
             pick.disabled = true;
             try {
-              const api = global.soduWorkAPI?.conversationSession || global.soduWorkAPI?.piSession;
-              if (!api?.pickCwd) throw Error('请在桌面客户端选择文件夹');
-              const result = await api.pickCwd(); // This picker does not change the global work directory.
+              const recent = await Promise.resolve(global.soduWorkAPI?.workspaceFolders?.list?.({ limit: 8 })).catch(() => null);
               if (!form.isConnected) return;
-              if (result?.ok && result.dir) {
-                if (!folders.some(p => p.replace(/\\/g, '/').toLowerCase() === result.dir.replace(/\\/g, '/').toLowerCase())) folders.push(result.dir);
-                if (!input.value.trim()) input.value = result.name || result.dir.split(/[\\/]/).filter(Boolean).pop();
-                paintFolders(); input.focus();
-              } else if (!result?.canceled) throw Error(result?.reason || '未能选择文件夹，请重试');
+              const choices = (recent?.folders || []).filter(row => !folders.some(p => samePath(p, row.dir))).slice(0, 5);
+              // Without history there is nothing to choose from; open the system dialog directly.
+              if (!choices.length) { await browse(); return; }
+              const menu = document.createElement('div'); menu.className = 'ws-project-folder-menu'; menu.setAttribute('role', 'menu');
+              const close = () => { menu.remove(); pick.focus(); };
+              for (const row of choices) {
+                const option = button('ws-project-folder-option', row.dir, icon('folder'));
+                option.setAttribute('role', 'menuitem');
+                const label = document.createElement('span'); label.textContent = row.name || row.dir; label.setAttribute('data-user-content', '');
+                const pathText = document.createElement('small'); pathText.textContent = row.dir; pathText.setAttribute('data-user-content', '');
+                option.append(label, pathText);
+                option.onclick = () => { menu.remove(); addFolder(row.dir, row.name); };
+                menu.appendChild(option);
+              }
+              const other = button('ws-project-folder-option', '浏览…', icon('folder') + '<span>浏览…</span>');
+              other.setAttribute('role', 'menuitem');
+              other.onclick = async () => { menu.remove(); try { await browse(); } catch (e) { error(e.message); } };
+              menu.appendChild(other);
+              menu.addEventListener('keydown', event => {
+                if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  const items = [...menu.querySelectorAll('button')], at = items.indexOf(document.activeElement);
+                  items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+                }
+              });
+              pick.after(menu); menu.querySelector('button')?.focus();
             } catch (e) { if (form.isConnected) error(e.message); } finally { pick.disabled = false; }
           };
           container.appendChild(pick);
@@ -279,15 +353,49 @@
         document.body.appendChild(dialog); dialog.showModal(); dialog.querySelector('.ws-move-option').focus();
       });
     }
-    function openProjectSession(project) {
+    // Asks how to continue when the default folder is missing, instead of silently using another place.
+    function chooseUnavailable(project, folder) {
+      return new Promise(resolve => {
+        if (dialog) { resolve(null); return; }
+        const previous = document.activeElement;
+        dialog = document.createElement('dialog'); dialog.className = 'ws-project-dialog ws-project-move-dialog';
+        dialog.setAttribute('aria-label', '项目默认文件夹不可用');
+        dialog.innerHTML = '<h2>项目默认文件夹当前不可用</h2><p class="ws-project-help"></p><div class="ws-move-options"></div>';
+        const help = dialog.querySelector('p'), where = document.createElement('span');
+        where.textContent = folder; where.setAttribute('data-user-content', '');
+        help.append(where, document.createElement('br'), '可能是网络位置或移动磁盘没有连接。');
+        const finish = choice => { const el = dialog; dialog = null; el.close(); el.remove(); if (previous?.isConnected) previous.focus(); resolve(choice); };
+        const close = button('ws-project-dialog-close', '关闭', icon('close')); close.onclick = () => finish(null); dialog.appendChild(close);
+        dialog.oncancel = event => { event.preventDefault(); finish(null); };
+        const options = dialog.querySelector('.ws-move-options');
+        const add = (label, choice, glyph = 'folder') => {
+          const option = button('ws-move-option', label, icon(glyph));
+          const text = document.createElement('span'); text.textContent = label; option.appendChild(text);
+          option.onclick = () => finish(choice); options.appendChild(option);
+        };
+        add('重试', { retry: true });
+        for (const other of (project.folders || []).slice(1)) add('改用 ' + (other.split(/[\\/]/).filter(Boolean).pop() || other), { cwd: other });
+        add('改用默认工作区', { cwd: '' });
+        document.body.appendChild(dialog); dialog.showModal(); options.querySelector('button')?.focus();
+      });
+    }
+    async function openProjectSession(project) {
       /*
        * An optional source folder controls execution cwd; absent folders use the default
        * workspace. Preserve sidebarProjectId and business associations independently.
        */
-      const folder = String(project?.folders?.[0] || '').trim();
+      let folder = String(project?.folders?.[0] || '').trim();
       if (!global.WorkspaceHost || typeof global.WorkspaceHost.open !== 'function') {
         notify(Error('新建会话入口暂不可用，请重试'));
         return;
+      }
+      const statusOf = global.soduWorkAPI?.workspaceFolders?.status;
+      while (folder && typeof statusOf === 'function') {
+        const reply = await Promise.resolve(statusOf([folder])).catch(() => null);
+        if (!reply?.ok || reply.folders?.[0]?.exists !== false) break;
+        const choice = await chooseUnavailable(project, folder);
+        if (!choice) return;
+        if (!choice.retry) { folder = choice.cwd; break; }
       }
       global.WorkspaceHost.open('create', {
         newSession: true,
@@ -340,6 +448,18 @@
         status.textContent = pinned ? '已置顶' : '已取消置顶';
       }); },
       openMoveMenu: id => moveMenu(id),
+      createProject: folder => safe(() => { state(); openDialog('', '', { folders: folder ? [folder] : [] }); }),
+      editProject: id => safe(() => { state(); openDialog(id); }),
+      createProjectFor: chatId => safe(() => { state(); openDialog('', String(chatId || '')); }),
+      moveChat: (chatId, destination) => move(String(chatId || ''), destination),
+      // Adds a natively chosen folder to an existing project; the current default stays first.
+      addProjectFolder: (projectId, dir) => safe(() => {
+        const project = state().get().projects.find(item => item.id === projectId);
+        if (!project || !dir) return false;
+        state().saveProject({ id: project.id, name: project.name, folders: [...project.folders, dir] });
+        render();
+        return true;
+      }),
       forget: id => safe(() => state().forget(id)),
       forgetMany: ids => safe(() => { state().forgetMany(ids); return true; }),
       forgetArchived: ids => safe(() => {

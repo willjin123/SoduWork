@@ -152,9 +152,26 @@
       close: _closeSetupPops,
       refresh: _paintSetup,
     });
+    p.querySelector('#cpWorkspace')?.addEventListener('click', () => { void _renderWorkspaceChoices(); });
     p.querySelector('#cpWorkspacePop').addEventListener('click', async (event) => {
+      const forget = event.target.closest('[data-workspace-forget]');
+      if (forget) {
+        event.preventDefault();
+        await Promise.resolve(global.soduWorkAPI?.workspaceFolders?.hide?.(forget.dataset.workspaceForget)).catch(() => {});
+        await _renderWorkspaceChoices();
+        return;
+      }
       const row = event.target.closest('[data-workspace]');
       if (!row) return;
+      if (row.dataset.workspace === 'new-project') {
+        _closeSetupPops();
+        global.WorkspaceShell?.createProject?.(_workspace.direct && !_isScratch(_workspace.dir) ? _workspace.dir : '');
+        return;
+      }
+      if (row.dataset.workspace === 'project' || row.dataset.workspace === 'recent') {
+        _chooseListedWorkspace(row);
+        return;
+      }
       if (row.dataset.workspace === 'temp') {
         _setupRevision += 1;
         _workspace = { ..._workspace, dir: '', name: '默认工作区', direct: false, workspaceSource: '' };
@@ -269,6 +286,88 @@
         if (result.dir) _syncRecentWorkspace('set', result.dir, _workspace.name);
       }
     } catch (error) { /* Canceling selection is not an error. */ }
+    _paintSetup();
+    _closeSetupPops();
+  }
+  // Windows paths compare without case or separator differences; other platforms compare exactly.
+  const _dirKey = (value) => {
+    const text = String(value || '').trim().replace(/[\\/]+$/, '');
+    return /^[a-z]:|^\\\\/i.test(text) ? text.replace(/\//g, '\\').toLowerCase() : text;
+  };
+  function _isScratch(dir) {
+    const root = _dirKey(_workspace.rootDir), target = _dirKey(dir);
+    const sep = /^[a-z]:|^\\\\/i.test(root) ? '\\' : '/';
+    return !!root && !!target && (target === root || target.startsWith(root + sep + 'temp' + sep));
+  }
+  let _choicesSeq = 0;
+  /*
+   * Projects with folders and recently chosen folders, listed between "默认工作区" and
+   * "选择其他文件夹…". Each render replaces the list; a later render wins.
+   */
+  async function _renderWorkspaceChoices() {
+    const host = document.getElementById('cpWorkspaceChoices');
+    if (!host) return;
+    const seq = ++_choicesSeq;
+    const projects = (global.WorkspaceShell?.searchProjects?.() || []).filter((project) => !project.appId && project.folders?.length);
+    let recent = [];
+    try { recent = (await Promise.resolve(global.soduWorkAPI?.workspaceFolders?.list?.({ limit: 8 })))?.folders || []; } catch (_) {}
+    if (seq !== _choicesSeq || !host.isConnected) return;
+    const owned = new Set(projects.flatMap((project) => project.folders.map(_dirKey)));
+    recent = recent.filter((row) => !owned.has(_dirKey(row.dir))).slice(0, 5);
+    const icons = global.WorkComposer?.icons || {};
+    const nameOf = (dir) => String(dir).split(/[\\/]/).filter(Boolean).pop() || String(dir);
+    const row = (kind, title, detail, data, glyph, nested) => {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'wc-pop-row' + (nested ? ' cp-workspace-sub' : '');
+      button.dataset.workspace = kind;
+      Object.entries(data || {}).forEach(([key, value]) => { button.dataset[key] = value; });
+      button.innerHTML = glyph || '';
+      const copy = document.createElement('span'), b = document.createElement('b'), i = document.createElement('i');
+      b.textContent = title; i.textContent = detail || '';
+      if (kind !== 'new-project') { b.setAttribute('data-user-content', ''); i.setAttribute('data-user-content', ''); }
+      copy.append(b, i); button.appendChild(copy);
+      const check = document.createElement('b'); check.className = 'wc-check'; check.textContent = '✓'; button.appendChild(check);
+      return button;
+    };
+    const heading = (text) => { const el = document.createElement('div'); el.className = 'wc-pop-title cp-workspace-heading'; el.textContent = text; return el; };
+    const nodes = [];
+    if (projects.length || global.WorkspaceShell?.createProject) nodes.push(heading('项目'));
+    for (const project of projects) {
+      const [first, ...others] = project.folders;
+      nodes.push(row('project', project.name, first, { dir: first, projectId: project.id }, icons.project || icons.folder));
+      // Further project folders can be chosen as this conversation's working folder.
+      for (const dir of others) nodes.push(row('project', nameOf(dir), dir, { dir, projectId: project.id }, icons.folder, true));
+    }
+    if (global.WorkspaceShell?.createProject) nodes.push(row('new-project', '新建项目…', '', {}, icons.plus));
+    if (recent.length) {
+      nodes.push(heading('最近使用'));
+      for (const item of recent) {
+        const wrap = document.createElement('div'); wrap.className = 'cp-workspace-item';
+        const forget = document.createElement('button');
+        forget.type = 'button'; forget.className = 'cp-workspace-forget'; forget.dataset.workspaceForget = item.dir;
+        forget.title = '从最近使用中移除'; forget.setAttribute('aria-label', '从最近使用中移除 ' + (item.name || nameOf(item.dir)));
+        forget.textContent = '✕';
+        wrap.append(row('recent', item.name || nameOf(item.dir), item.dir, { dir: item.dir }, icons.folder), forget);
+        nodes.push(wrap);
+      }
+    }
+    host.replaceChildren(...nodes);
+    _paintSetup();
+  }
+  function _chooseListedWorkspace(row) {
+    const dir = String(row.dataset.dir || '');
+    if (!dir) return;
+    _setupRevision += 1;
+    const project = row.dataset.workspace === 'project'
+      ? (global.WorkspaceShell?.searchProjects?.() || []).find((item) => item.id === row.dataset.projectId) : null;
+    // Choosing a project folder also files the conversation in that project; a recent folder keeps the draft's project.
+    const options = project
+      ? { cwd: dir, workspaceLabel: project.name, projectId: project.businessProjectId || '', sidebarProjectId: project.id, sidebarProjectName: project.name }
+      : { cwd: dir, workspaceLabel: row.querySelector('b')?.textContent || '', projectId: _workspace.projectId || '',
+        sidebarProjectId: _workspace.sidebarProjectId || '', sidebarProjectName: _workspace.sidebarProjectName || '' };
+    _workspace = { ...global.ComposeSurface.newSessionWorkspace(_workspace, options), repoId: _workspace.repoId || '' };
+    void global.ComposeDirectoryPreferences?.begin();
+    if (!project) _syncRecentWorkspace('set', dir, _workspace.name);
     _paintSetup();
     _closeSetupPops();
   }

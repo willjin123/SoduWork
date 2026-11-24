@@ -92,6 +92,7 @@ const conversationSession = {
   setThinking: (ref, value) => ipcRenderer.invoke('pi-session-set-thinking', ref,
     typeof value === 'string' ? value : Boolean(value)),
   setAccessMode: (ref, mode, expectedRevision, options) => ipcRenderer.invoke('pi-session-set-access-mode', ref, mode, expectedRevision, options || {}),
+  setAccessRoots: (ref, dirs, expectedRevision) => ipcRenderer.invoke('pi-session-set-access-roots', ref, dirs, expectedRevision),
   snapshot: (ref, options) => ipcRenderer.invoke('pi-session-snapshot', ref, options || {}),
   outputs: (ref) => ipcRenderer.invoke('pi-session-outputs', ref),
   artifactAction: (ref, artifactId, action) =>
@@ -552,6 +553,19 @@ const soduWorkBridge = {
     get: () => ipcRenderer.invoke('recent-workspace-get'),
     set: (dir, name) => ipcRenderer.invoke('recent-workspace-set', { dir, name }),
     clear: () => ipcRenderer.invoke('recent-workspace-clear'),
+  },
+  // Folders chosen through the native dialog; the main process validates every path.
+  workspaceFolders: {
+    list: (options) => ipcRenderer.invoke('workspace-folders-list', options || {}),
+    hide: (dir) => ipcRenderer.invoke('workspace-folders-hide', dir),
+    status: (dirs) => ipcRenderer.invoke('workspace-folders-status', dirs),
+    confirm: (dirs, label) => ipcRenderer.invoke('workspace-folders-confirm', dirs, label),
+    open: (dir) => ipcRenderer.invoke('workspace-folders-open', dir),
+    session: (sessionId) => ipcRenderer.invoke('workspace-folders-session', sessionId),
+    setSession: (sessionId, dirs) => ipcRenderer.invoke('workspace-folders-session-set', sessionId, dirs),
+    automation: (scheduleId) => ipcRenderer.invoke('workspace-folders-automation', scheduleId),
+    setAutomation: (scheduleId, project) => ipcRenderer.invoke('workspace-folders-automation-set', scheduleId, project),
+    refreshAutomations: (projects) => ipcRenderer.invoke('workspace-folders-automation-refresh', projects),
   },
   onLocaleChange: (callback) => {
     const listener = (_event, locale) => callback(locale);
