@@ -8,16 +8,21 @@ import inspect
 import json
 import os
 from pathlib import Path
+import secrets
 import tempfile
 import textwrap
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 _tmp = tempfile.TemporaryDirectory(prefix="soduwork-smoke-admin-security-")
 os.environ["DATABASE_URL"] = (
     "sqlite+aiosqlite:///" + (Path(_tmp.name) / "security.db").as_posix())
+CONSOLE_ORIGIN = "https://console.example.test"
+os.environ["CORS_ORIGINS"] = CONSOLE_ORIGIN
 
 import httpx  # noqa: E402
+from fastapi import Response  # noqa: E402
 from sqlalchemy import func, select  # noqa: E402
 from route_test_support import api_routes  # noqa: E402
 
@@ -60,6 +65,39 @@ def check(name: str, condition: bool, detail="") -> None:
     else:
         failed += 1
         print("  FAIL  " + name + ("  << " + str(detail)[:500] if detail else ""))
+
+
+async def admin_cache_contract(client, headers):
+    def check_headers(label, reply, status, *vary):
+        fields = [field.strip().lower() for field in reply.headers.get("vary", "").split(",")]
+        check(label, reply.status_code == status and reply.headers.get("cache-control") == "no-store"
+              and all(fields.count(field) == 1 for field in vary),
+              (reply.status_code, reply.headers.get("cache-control"), fields))
+
+    for path in ("users", "audit", "orgs", "llm-config", "mail-settings", "quotas", "alert-config"):
+        reply = await client.get(f"/api/v1/admin/{path}", headers={**headers, "Origin": CONSOLE_ORIGIN})
+        check_headers(f"admin/{path} keeps origin and varies by authorization", reply, 200, "origin", "authorization")
+
+    denied = await client.get("/api/v1/admin/users")
+    check_headers("authentication errors use the same cache policy", denied, 401, "authorization")
+
+    for extra in (None, "aUtHoRiZaTiOn"):
+        payload = Response(headers={"Vary": "Accept-Language", "Cache-Control": "public, max-age=60"})
+        payload.headers.append("Vary", "Accept-Encoding")
+        if extra:
+            payload.headers.append("Vary", extra)
+        with patch("app.api.admin._me_payload", return_value=payload):
+            reply = await client.get("/api/v1/admin/me", headers=headers)
+        check_headers("admin policy preserves all Vary fields and prevents route caching",
+                      reply, 200, "accept-language", "accept-encoding", "authorization")
+
+    with patch("app.api.admin._me_payload", side_effect=RuntimeError("fixture")):
+        error = await client.get("/api/v1/admin/me", headers=headers)
+    check_headers("unexpected admin errors use the same cache policy", error, 500, "authorization")
+
+    other = await client.get("/api/v1/administration", headers=headers)
+    check("similarly named paths stay outside the admin cache policy",
+          other.status_code == 404 and "authorization" not in other.headers.get("vary", "").lower())
 
 
 def dependency_calls(dependant):
@@ -193,6 +231,38 @@ async def approval_audits(client, actor, headers):
                            "action": "baseline", "note": action,
                            **(body if route == "transfer" else {})})
         check(f"approval {action} commits one attributed audit for the selected request", audited, response.text)
+        if audited:
+            verified.add(("POST", path))
+    return verified
+
+
+async def device_pairing_audits(client, actor, headers, first_owner, second_owner):
+    """Credit delegated device routes only after their state and audit are committed."""
+    device = "audit-pairing-desktop"
+    key_headers = {"X-Device-Key": secrets.token_urlsafe(32)}
+    verified = set()
+    for action, path, owner in (
+        ("pair", "/api/v1/admin/clients/pair", first_owner),
+        ("assign", "/api/v1/admin/clients/{cid}/assign", second_owner),
+        ("activate", "/api/v1/admin/clients/{cid}/activate", first_owner),
+    ):
+        enrollment = await client.post("/api/v1/clients/enroll?pairing=true",
+                                       headers=key_headers, json={"device": device})
+        proof = enrollment.json().get("pairingToken")
+        if enrollment.status_code != 200 or not proof:
+            check(f"device can request proof for {action}", False, enrollment.status_code)
+            break
+        response = await client.post(path.format(cid=device), headers=headers,
+                                     json={"userId": owner, "pairingToken": proof})
+        async with SessionLocal() as session:
+            bound = await session.get(models.Client, device)
+            rows = (await session.scalars(select(models.AuditLog).where(
+                models.AuditLog.target_id == device, models.AuditLog.action == "client." + action))).all()
+            audited = (response.status_code == 200 and bound is not None
+                       and bound.auth_state == "active" and bound.user_ref == owner
+                       and len(rows) == 1 and rows[0].actor_id == actor
+                       and rows[0].target_type == "client" and rows[0].detail == {"ownerUserId": owner})
+        check(f"device {action} commits ownership and one attributed audit", audited, response.status_code)
         if audited:
             verified.add(("POST", path))
     return verified
@@ -420,6 +490,7 @@ async def main() -> None:
     async with httpx.AsyncClient(
         transport=transport, base_url="http://soduwork.test"
     ) as client:
+        await admin_cache_contract(client, super_headers)
         verified = await approval_audits(client, super_user.id, super_headers)
         verified.update(await batch_user_audits(client, super_user.id, super_headers))
         denied = await client.post(
@@ -655,6 +726,7 @@ async def main() -> None:
 
 
     async with httpx.AsyncClient(transport=transport, base_url="http://soduwork.test") as client:
+        verified.update(await device_pairing_audits(client, super_user.id, super_headers, ordinary.id, outsider.id))
         verified.update(await catalog_batch_audits(client, super_user.id, super_headers))
     audit_contract(verified)
 
