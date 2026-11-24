@@ -516,6 +516,51 @@ function _schCustomRuleHtml(s) {
     '<small>' + _schTx('按天、周、月重复时，夏令时跳过的时刻顺延，重复时刻执行一次') + '</small></label>';
 }
 
+/*
+ * An automation may run with a sidebar project's folders (#1327). Projects and their
+ * folders live on this device, so the local main process keeps the binding and applies
+ * it to every run, including unattended ones. The sidebar refreshes the folders.
+ */
+const _schFolderApi = () => window.soduWorkAPI && window.soduWorkAPI.workspaceFolders;
+function _schFolderProjects() {
+  return (window.WorkspaceShell?.searchProjects?.() || []).filter(project => !project.appId && project.folders?.length);
+}
+function _schProjectFolderHtml() {
+  if (!_schFolderApi()?.setAutomation) return '';
+  const options = _schFolderProjects().map(project => '<option value="' + esc(project.id) + '" data-user-content>' + esc(project.name) + '</option>').join('');
+  return '<label class="sch-f-lbl" for="schFolderProject">使用项目文件夹</label>' +
+    '<select class="sch-in" id="schFolderProject"><option value="">不使用</option>' + options + '</select>' +
+    '<small class="sch-folder-list" id="schFolderList"></small>';
+}
+// Shows the stored binding once the editor is open; a project no longer present is reported.
+async function _schLoadFolderBinding(scheduleId) {
+  const select = document.getElementById('schFolderProject');
+  if (!select || !scheduleId) return;
+  const reply = await Promise.resolve(_schFolderApi()?.automation?.(scheduleId)).catch(() => null);
+  const bound = reply?.binding?.projectId || '';
+  if (!bound || !select.isConnected) return;
+  if (![...select.options].some(option => option.value === bound)) {
+    const missing = new Option('原项目已不可用，请重新选择', '');
+    select.add(missing, 1); select.value = '';
+  } else select.value = bound;
+  _schPaintFolderList();
+}
+function _schPaintFolderList() {
+  const list = document.getElementById('schFolderList'), select = document.getElementById('schFolderProject');
+  if (!list || !select) return;
+  const project = _schFolderProjects().find(item => item.id === select.value);
+  if (!project) { list.textContent = ''; return; }
+  const [first, ...others] = project.folders;
+  // One line per node so each label translates on its own; paths stay user content.
+  const line = (label, value) => {
+    const row = document.createElement('span'), path = document.createElement('span');
+    path.textContent = value; path.setAttribute('data-user-content', '');
+    row.append(label, path);
+    return row;
+  };
+  list.replaceChildren(line('工作文件夹：', first), ...(others.length ? [line('附加文件夹：', others.join('、'))] : []),
+    Object.assign(document.createElement('span'), { textContent: '只在这台电脑生效；项目文件夹变化后，从下一次运行开始生效。' }));
+}
 function _schFormHtml(s) {
   s = s || { title: '', note: '', every: 'daily', atHour: 18, atMinute: 0, weekday: 1,
              weekdays: [], monthDays: [], monthDayPolicy: 'skip', startDate: '', endDate: '', customRule: '',
@@ -560,7 +605,7 @@ function _schFormHtml(s) {
     (s.repoId && !_schRepos.some(r => r.id === s.repoId) ? '<option value="' + esc(s.repoId) +
       '" selected disabled>原工程已不可用或无权访问，请重新选择</option>' : '') +
     _schRepos.map(r => '<option value="' + esc(r.id) + '"' + (r.id === s.repoId ? ' selected' : '') + '>' + esc(r.name) + '</option>').join('') +
-    '</select>' +
+    '</select>' + _schProjectFolderHtml() +
 
     '<div class="sch-mode-tabs" role="tablist" hidden style="display:none">' +
     '<button class="sch-mode-btn' + (mode === 'direct' ? ' on' : '') + '" data-mode="direct" role="tab">直接执行' +
@@ -617,6 +662,9 @@ function _wireSchForm() {
   let methodRequired = new Set();
   let mode = document.querySelector('.sch-mode-btn.on').getAttribute('data-mode');
   let inputValues = Object.assign({}, (_schEditing && _schEditing !== 'new' && _schEditing.pluginInputs) || {});
+  document.getElementById('schFolderProject')?.addEventListener('change', _schPaintFolderList);
+  _schPaintFolderList();
+  void _schLoadFolderBinding(_schEditing && _schEditing !== 'new' ? String(_schEditing.id || '') : '');
 
   const readPluginInputs = () => {
     const values = {};
@@ -948,8 +996,16 @@ function _wireSchForm() {
        */
       const editingId = _schEditing && _schEditing !== 'new'
         ? String(_schEditing.id || '') : '';
-      if (editingId) await SoduWorkAPI.updateSchedule(editingId, body);
-      else await SoduWorkAPI.createSchedule(body);
+      const folderProjectId = document.getElementById('schFolderProject')?.value || '';
+      const folderProject = _schFolderProjects().find(project => project.id === folderProjectId);
+      // Runs are unattended, so older project folders are confirmed now, while the user is here.
+      if (folderProject) await Promise.resolve(window.soduWorkAPI?.workspaceFolders?.confirm?.(folderProject.folders, folderProject.name)).catch(() => {});
+      const saved = editingId ? await SoduWorkAPI.updateSchedule(editingId, body) : await SoduWorkAPI.createSchedule(body);
+      const savedId = editingId || String(saved?.id || saved?.schedule?.id || '');
+      if (document.getElementById('schFolderProject') && savedId) {
+        await Promise.resolve(_schFolderApi()?.setAutomation?.(savedId, folderProject
+          ? { id: folderProject.id, name: folderProject.name, folders: folderProject.folders } : null)).catch(() => {});
+      }
       if (!isCurrent()) return;
       if (typeof petSay === 'function') petSay(body.every === 'once' ? '一次性自动化已保存' : '定时任务已保存，到点创建普通会话并发送提示词');
       _schCloseEditor(false); _schRows = null; _loadSch();

@@ -75,7 +75,20 @@ async function _schOpenRunEntryConversation(run) {
   return false;
 }
 
-async function _schLaunchDirectConversation(launched, scope) {
+// A run of an automation bound to a sidebar project is filed in that project, so later
+// turns in the conversation keep the project's folders (#1327).
+async function _schFileRunInProject(scheduleId, chatId) {
+  const shell = globalThis.WorkspaceShell, folders = globalThis.soduWorkAPI?.workspaceFolders;
+  if (!scheduleId || !chatId || typeof shell?.fileChatInProject !== 'function' || typeof folders?.automation !== 'function') return;
+  try {
+    const projectId = (await folders.automation(scheduleId))?.binding?.projectId || '';
+    if (projectId && !shell.projectForChat?.(chatId) && (shell.searchProjects?.() || []).some(item => item.id === projectId)) {
+      shell.fileChatInProject(chatId, projectId);
+    }
+  } catch (_) { /* The conversation stays in recent chats. */ }
+}
+
+async function _schLaunchDirectConversation(launched, scope, scheduleId = '') {
   if (scope !== _schScope) return false;
   const input = launched && launched.conversationInput || {};
   const bridge = globalThis.soduWorkAPI &&
@@ -104,6 +117,8 @@ async function _schLaunchDirectConversation(launched, scope) {
     capabilities: Array.isArray(input.capabilities) ? input.capabilities : [],
     skills: Array.isArray(input.skills) ? input.skills : [],
     ...(pluginLock ? { pluginLock } : {}),
+    // The main process applies this schedule's project folders, if it is bound to a project.
+    ...(scheduleId ? { automationScheduleId: String(scheduleId) } : {}),
   };
   let opened;
   try {
@@ -164,6 +179,7 @@ async function _schLaunchDirectConversation(launched, scope) {
   if (settled || scope !== _schScope) { settled = true; stopRenewal(); return false; }
   // Navigate as soon as the ordinary chat exists. Sending the first prompt
   // continues through the same native bridge after the user sees the chat.
+  if (chatId) await _schFileRunInProject(scheduleId, chatId);
   if (chatId) await _schOpenRunEntryConversation({conversationId: chatId, conversationTitle});
   if (settled || scope !== _schScope) { settled = true; stopRenewal(); return false; }
   const finish = (state, error = '') => {
@@ -200,8 +216,9 @@ async function _schLaunchDirectConversation(launched, scope) {
 async function _schLaunchRunConversation(sid, launched, scope) {
   if (scope !== _schScope || ['failed', 'cancelled'].includes(launched && launched.state)) return false;
   if (launched && launched.conversationInput &&
-      await _schLaunchDirectConversation(launched, scope)) return true;
+      await _schLaunchDirectConversation(launched, scope, sid)) return true;
   if (scope !== _schScope) return false;
+  if (_schRunChatId(launched || {})) await _schFileRunInProject(sid, _schRunChatId(launched));
   if (await _schOpenRunEntryConversation(launched || {})) return true;
   const runId = String(launched && launched.scheduleRunId || '');
   if (!runId) return false;
@@ -218,6 +235,7 @@ async function _schLaunchRunConversation(sid, launched, scope) {
     _schRunRows[sid] = rows;
     const row = (rows || []).find(item => String(item.id) === runId);
     if (row && ['failed', 'cancelled'].includes(row.state)) return false;
+    if (row && _schRunChatId(row)) await _schFileRunInProject(sid, _schRunChatId(row));
     if (row && await _schOpenRunEntryConversation(row)) return true;
   }
   return false;

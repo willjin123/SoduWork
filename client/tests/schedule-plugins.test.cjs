@@ -142,8 +142,7 @@ test('automation templates come only from the admin console (no built-in fallbac
 
 test('模板产生的是新草稿，只有真实持久化 id 才走更新接口', () => {
   assert.match(panel, /const editingId = _schEditing/);
-  assert.match(panel, /if \(editingId\) await SoduWorkAPI\.updateSchedule\(editingId, body\)/);
-  assert.match(panel, /else await SoduWorkAPI\.createSchedule\(body\)/);
+  assert.match(panel, /editingId \? await SoduWorkAPI\.updateSchedule\(editingId, body\) : await SoduWorkAPI\.createSchedule\(body\)/);
   assert.doesNotMatch(panel,
     /if \(_schEditing && _schEditing !== 'new'\) await SoduWorkAPI\.updateSchedule/);
 });

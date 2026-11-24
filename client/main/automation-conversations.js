@@ -210,6 +210,8 @@ function createWorker({ identityOf, request, journal, conversation, catalog, loc
         adapterId: input.adapterId, modelName, intent: 'chat',
         cwd: input.cwd || '', capabilities: input.capabilities && input.capabilities.length ? input.capabilities : undefined,
         skills: input.skills,
+        // The open path applies a project folder binding for this schedule, if any.
+        ...(claimed.scheduleId ? { automationScheduleId: String(claimed.scheduleId) } : {}),
         ...(plugin ? { pluginLock: plugin } : {}),
       };
       if (record?.accessChoice && claimed.trigger !== 'manual') throw Error('本次自动化授权来源已变化，请重新运行');
