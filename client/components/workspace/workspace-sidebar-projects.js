@@ -11,6 +11,8 @@
   const paths = {
     folder: '<path d="M3.5 7V5.5a2 2 0 0 1 2-2h4l2 3h7a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7ZM3.5 10h17"/>',
     app: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8"/>',
+    // A project groups folders; keep it distinct from the single-folder icon (WorkComposer.icons.project).
+    project: '<path d="M7 4.5h3.2l1.6 1.6H18a2 2 0 0 1 2 2"/><path d="M3 10a2 2 0 0 1 2-2h3.6l1.8 1.8H17a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
@@ -21,7 +23,7 @@
   const icon = name => '<svg viewBox="0 0 24 24" aria-hidden="true">' + paths[name] + '</svg>';
   function groupIcon(project = {}) {
     const artwork = project.appId && global.SoduWorkPluginIcon?.image(project.appIcon);
-    const fallback = project.appId ? 'app' : 'folder';
+    const fallback = project.appId ? 'app' : 'project';
     return { markup: artwork || icon(fallback), key: artwork ? project.appIcon : fallback };
   }
   const button = (className, label, markup) => {
@@ -51,17 +53,23 @@
       if (status.textContent === message) return;
       status.textContent = message; global.petSay?.(message);
     };
+    // Conversation views describe their working location from project membership.
+    const announce = () => {
+      if (typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
+        global.dispatchEvent(new global.CustomEvent('soduwork-sidebar-projects-changed'));
+      }
+    };
     function state() {
       const options = global.WorkspaceSidebarState.accountOptions({ storage: localStorage, api: global.SoduWorkAPI });
       if (options.key !== scope) {
         expandedProjects.clear();
-        store = global.WorkspaceSidebarState.create({...options, onChange: () => { void sync?.run(); }});
+        store = global.WorkspaceSidebarState.create({...options, onChange: () => { void sync?.run(); announce(); }});
         scope = options.key;
         const ownScope = scope;
         sync = options.writable === false ? null : global.WorkspaceSidebarState.projectSync({store, api: global.SoduWorkAPI,
           storage: localStorage, key: scope, current: () => ownScope === scope &&
             global.WorkspaceSidebarState.storageKey(global.SoduWorkAPI) === ownScope,
-          changed: () => render(), error: e => { console.warn('Project sync:', e.message); }});
+          changed: () => { render(); announce(); }, error: e => { console.warn('Project sync:', e.message); }});
         lastSync = 0;
       }
       if (Date.now() - lastSync > 10000) {
@@ -112,7 +120,7 @@
         dialog = document.createElement('dialog'); dialog.className = 'ws-project-dialog';
         dialog.setAttribute('aria-labelledby', 'wsProjectDialogTitle');
         dialog.innerHTML = '<form class="ws-project-form"><header><h2 id="wsProjectDialogTitle"></h2></header>' +
-          '<label class="ws-project-name"><span>' + icon('folder') + '</span><input id="wsProjectName" maxlength="80" autocomplete="off" placeholder="项目名称" aria-label="项目名称"></label>' +
+          '<label class="ws-project-name"><span>' + icon('project') + '</span><input id="wsProjectName" maxlength="80" autocomplete="off" placeholder="项目名称" aria-label="项目名称"></label>' +
           '<label class="ws-project-link"><span>关联需求池项目 <small>可选</small></span><select id="wsBusinessProject" disabled><option value="">正在读取项目…</option></select></label>' +
           '<div class="ws-project-folder-label">源文件夹 <small>可选</small></div><div class="ws-project-folders"></div>' +
           '<p class="ws-project-help">关联后可在会话中选择该项目的需求，沿用已有上下文。整理会话不会改变工作目录。</p>' +

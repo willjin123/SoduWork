@@ -22,7 +22,7 @@
     '执行会话': 'Execution conversation',
     '选择执行会话': 'Choose an execution conversation',
     '所选工程的工作目录由执行端确定。': 'The executor determines the working directory for the selected repository.',
-    '新建本机会话时，文件路径相对于独立的会话目录。会话建立后，点击「打开位置」可查看目录。': 'A new local conversation gets its own folder. Relative file paths start there. Choose “Open location” in the conversation to open it.',
+    '新建本机会话时，文件路径相对于独立的会话目录。会话建立后，点击「打开文件夹」可查看目录。': 'A new local conversation gets its own folder. Relative file paths start there. Choose “Open folder” in the conversation to open it.',
     '暂无输入材料': 'No input files attached.',
     '无法读取相关材料': 'Could not load the supporting materials.',
     '正在上传材料…': 'Uploading files…',

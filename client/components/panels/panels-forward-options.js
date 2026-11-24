@@ -482,7 +482,7 @@ function _fwdSyncConfirm(tid) {
       directoryHint = '所选工程的工作目录由执行端确定。';
     } else if (choice.type === 'native' || (/^local:/.test(choice.id) && !agent?.remote &&
         (!agent?.locationMode || agent.locationMode === 'local'))) {
-      directoryHint = '新建本机会话时，文件路径相对于独立的会话目录。会话建立后，点击「打开位置」可查看目录。';
+      directoryHint = '新建本机会话时，文件路径相对于独立的会话目录。会话建立后，点击「打开文件夹」可查看目录。';
     }
   }
   decision.innerHTML = modelHtml + (directoryHint ? '<small class="fwd-directory-hint">' + directoryHint + '</small>' : '');

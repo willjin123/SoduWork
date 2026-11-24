@@ -394,12 +394,30 @@
     const remote = _snap?.cloudHandoff?.phase === 'committed';
     const workspace = remote ? { ..._wd,
       name: _snap.cloudHandoff.target?.runnerKind === 'work-computer' ? '电脑成果' : '云端成果' } : _wd;
+    _loadWorkRoot();
+    const location = global.WorkComposer?.workspaceLocation
+      ? WorkComposer.workspaceLocation({ dir: _wd.dir, remoteLabel: remote ? workspace.name : '',
+        project: remote ? null : _workspaceProject(), defaultWorkspace: _isDefaultWorkspace(_wd.dir) })
+      : { icon: 'folder', label: workspace.name || '默认工作区', tooltip: _wd.dir || workspace.name || '', user: false };
+    const mark = (node, name, value) => {
+      if (value !== null) node.setAttribute?.(name, value); else node.removeAttribute?.(name);
+    };
     const wd = document.getElementById('nchatWdName');
-    if (wd) wd.textContent = workspace.name || '选个文件夹';
+    if (wd) {
+      if (wd.textContent !== location.label) wd.textContent = location.label;
+      // Project and folder names are user content and must not be localized.
+      mark(wd, 'data-user-content', location.user ? '' : null);
+    }
     const el = document.getElementById('nchatWd');
     if (el) {
-      el.title = _wd.dir || (remote ? workspace.name : '还没选文件夹');
-      el.setAttribute('aria-label', workspace.name || '工作位置');
+      el.title = location.tooltip;
+      el.setAttribute('aria-label', location.label + (_wd.dir ? '，' + _wd.dir : ''));
+      mark(el, 'data-user-attributes', location.user ? 'title aria-label' : null);
+      const icon = global.WorkComposer?.icons?.[location.icon] && el.querySelector?.('svg');
+      if (icon && el.getAttribute?.('data-location-icon') !== location.icon) {
+        icon.outerHTML = WorkComposer.icons[location.icon];
+        el.setAttribute('data-location-icon', location.icon);
+      }
     }
     const md = document.getElementById('nchatModeName');
     if (md) md.textContent = (_snap?.nextAccessPolicy || _snap?.accessPolicy) ? WorkComposer.permissionLabel((_snap.nextAccessPolicy || _snap.accessPolicy).mode) : (_mode === 'readonly' ? '只读' : '兼容权限');
@@ -410,6 +428,35 @@
     if (global.ChatChrome) ChatChrome.setWorkspace(workspace);
     if (_composerControls) _composerControls.render();
   }
+  // The default workspace root, read once from the main process. Its temp
+  // folders are per-conversation scratch directories, not chosen folders.
+  let _workRoot = '', _workRootRequested = false;
+  function _loadWorkRoot() {
+    if (_workRootRequested) return;
+    _workRootRequested = true;
+    const api = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
+    if (!api || typeof api.workdir !== 'function') return;
+    Promise.resolve(api.workdir()).then((root) => {
+      if (root && root.ok && root.dir) { _workRoot = String(root.dir); _paintBar(); }
+    }).catch(() => { _workRootRequested = false; });
+  }
+  function _isDefaultWorkspace(dir) {
+    const key = (value) => String(value || '').replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
+    const root = key(_workRoot), target = key(dir);
+    return !!root && !!target && (target === root || target.startsWith(root + '\\temp\\'));
+  }
+  function _workspaceProject() {
+    const shell = global.WorkspaceShell;
+    if (!shell) return null;
+    if (_sessionId && typeof shell.projectForChat === 'function') {
+      const owner = shell.projectForChat(_sessionId);
+      if (owner) return owner;
+    }
+    const id = String(_sessionOptions?.sidebarProjectId || '');
+    return id && typeof shell.searchProjects === 'function'
+      ? (shell.searchProjects().find((project) => project.id === id) || null) : null;
+  }
+  global.addEventListener?.('soduwork-sidebar-projects-changed', () => _paintBar());
   function _thinkingStatusHtml(busy) {
     return _chatStatus ? _chatStatus.statusHtml(busy) : '';
   }

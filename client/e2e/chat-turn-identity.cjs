@@ -34,7 +34,7 @@ if (typeof electron === 'string') {
     ${styles.map(file => '<link rel="stylesheet" href="' + file + '">').join('\n')}
     <style>body{margin:0;color:var(--ink);background:var(--bg-0);font:14px var(--font-ui)}#cpChat{height:100vh}</style>
     <div id="cpChat" class="nchat"><div class="nchat-main">
-      <div class="nchat-head-actions"><button id="fixtureLocation">打开位置</button></div>
+      <div class="nchat-head-actions"><button id="fixtureLocation">打开文件夹</button></div>
       <div id="nchatScroll" class="nchat-scroll"><div id="nchatList" class="nchat-inner"></div></div>
       <div hidden><textarea id="nchatInput"></textarea><button id="nchatSend"></button>
         <div id="nchatQueue"></div><div id="nchatTaskSuggest"></div><button id="nchatWd"></button></div>

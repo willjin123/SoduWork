@@ -131,6 +131,23 @@ test('remote conversation bar identifies downloaded results without relabeling t
  assert.equal(root.querySelector('#nchatWd').title,workspace.dir);
  assert.doesNotMatch(root.querySelector('#nchatWd').title,/点击打开/);
 });
+test('conversation bar labels the working folder from project membership on every repaint',()=>{
+ const root=element(),window={addEventListener(){}};
+ vm.runInNewContext(read('work-composer.js'),{window,innerWidth:1000,innerHeight:800});
+ let owner={id:'p1',name:'前端项目',folders:['D:\\work\\web']};
+ const ctx={document:{getElementById:id=>root.querySelector('#'+id)},
+  global:{ChatChrome:{setWorkspace(){}},WorkComposer:window.WorkComposer,WorkspaceShell:{projectForChat:()=>owner,searchProjects:()=>[]}},
+  _wd:{dir:'D:\\work\\web',name:'web'},_snap:{},_mode:'full',_sessionCaps:[],_composerControls:null,_sessionId:'chat-1',_sessionOptions:{}};
+ ctx.ChatChrome=ctx.global.ChatChrome;ctx.WorkComposer=window.WorkComposer;
+ const source=read('panels-chat.js'),start=source.indexOf('  function _paintBar()');
+ vm.runInNewContext(source.slice(start,source.indexOf('  function _thinkingStatusHtml',start))+'\n_paintBar();',ctx);
+ const label=()=>root.querySelector('#nchatWdName').textContent,tip=()=>root.querySelector('#nchatWd').title;
+ assert.equal(label(),'前端项目');assert.match(tip(),/^前端项目\n工作文件夹：D:\\work\\web$/);
+ owner=null;ctx._paintBar();
+ assert.equal(label(),'web','leaving the project shows the folder that is still the working folder');
+ owner={id:'p2',name:'文档',folders:['D:\\docs']};ctx._paintBar();
+ assert.equal(label(),'web');assert.match(tip(),/所属项目：文档（工作文件夹不在项目中）/);
+});
 test('new drafts default local; a pending cloud check cannot switch back after the user selects local',async()=>{
  const f=composeFixture(),wait=deferred();assert.equal(f.window.ComposeExecution.value(),'local');f.runtime.refreshAccess=()=>wait.promise;
  f.click('cloud');f.click('local');wait.resolve();await tick();assert.equal(f.window.ComposeExecution.value(),'local');assert.equal(f.local.getAttribute('aria-pressed'),'true');assert.equal(f.starts.length,0);

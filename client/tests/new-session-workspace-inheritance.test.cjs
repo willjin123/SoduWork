@@ -222,7 +222,9 @@ test('conversation composer omits the removed workspace-switch action and its pr
   const css = read('components/panels/work-composer.css');
   assert.doesNotMatch(css, /\.wc-wd-pick/);
   assert.doesNotMatch(bindings, /querySelector\('#nchatWd'\)\.addEventListener/);
-  assert.match(composer, /id: 'nchatWd',[\s\S]{0,160}readOnly: true/);
+  // The label may open the existing directory (#1327) but never changes it.
+  assert.match(composer, /id: 'nchatWd',[\s\S]{0,160}openLocation: true/);
+  assert.doesNotMatch(composer, /id: 'nchatWd',[\s\S]{0,160}popup: true/);
   assert.match(read('components/panels/panels-chat-chrome.js'), /data-chat-open-location/,
     'the independent header action still opens the existing directory');
 });

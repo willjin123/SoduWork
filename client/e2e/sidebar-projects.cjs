@@ -178,7 +178,7 @@ async function run() {
   assert.equal(icons.find(p=>p.appId==='local:artwork').width, 18);
   assert.equal(icons.find(p=>p.appId==='local:fallback').src, '');
   assert.equal(icons.find(p=>p.appId==='local:fallback').rects, 4, 'invalid artwork falls back to the app glyph');
-  assert.equal(icons.find(p=>!p.appId).paths, 1, 'ordinary projects retain their folder');
+  assert.equal(icons.find(p=>!p.appId).paths, 2, 'ordinary projects use the project icon, distinct from a folder');
   assert.equal(icons.every(p=>p.matchesHeading), true, 'move options and sidebar use the same group icon');
   await shot('05-move-application-icons');
   await js(`document.querySelector('[data-move-to="'+iconGroups.find(p=>p.appId==='local:artwork').id+'"]').click()`);

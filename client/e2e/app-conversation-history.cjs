@@ -117,7 +117,7 @@ app.whenReady().then(async () => {
   const second = await js(composer, 'NativeChat.create("第二条运营对话")');
   await js(composer, 'document.querySelector("[data-app-chat-history]").click()');
   await until(() => js(composer, 'document.querySelectorAll(".app-chat-history-row").length===2'), 'two history rows');
-  await tap(composer, '[data-chat-open-location]');
+  await tap(composer, '.nchat-head-action[data-chat-open-location]');
   assert.equal(locationOpens, 1, 'one pointer click opens the folder even with history visible');
   await js(composer, 'document.querySelector("[data-app-chat-history]").click()');
   assert.equal(await js(composer, '!!document.querySelector("dialog:popover-open")&&!document.querySelector("dialog:modal")&&getComputedStyle(document.querySelector("dialog")).display!=="none"'), true);

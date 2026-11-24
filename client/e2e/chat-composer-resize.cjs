@@ -225,12 +225,12 @@ if (typeof electron === 'string') {
     await click('.nmodel-button'); await until(`document.querySelectorAll('[data-model-name]').length===1`); await popup('.nmodel-pop'); await shot('model-menu');
     await click('[data-model-name="long-model"]'); await until(`document.querySelector('.nmodel-pop').hidden`);
     await click('#nchatMore'); await popup('#nchatMorePop'); await shot('add-menu'); await click('#nchatMore');
-    assert.deepEqual(await js(`(()=>{const e=document.querySelector('#nchatWd');return{tag:e.tagName,tabIndex:e.tabIndex,cursor:getComputedStyle(e).cursor}})()`),
-      { tag: 'SPAN', tabIndex: -1, cursor: 'default' });
-    await click('#nchatWd'); assert.equal(openedWorkdirs, 0, 'the existing workspace label is display-only');
-    await click('[data-chat-open-location]'); assert.equal(openedWorkdirs, 1, 'the header retains explicit folder access');
+    assert.deepEqual(await js(`(()=>{const e=document.querySelector('#nchatWd');return{tag:e.tagName,tabIndex:e.tabIndex,cursor:getComputedStyle(e).cursor,popup:e.hasAttribute('aria-haspopup')}})()`),
+      { tag: 'BUTTON', tabIndex: 0, cursor: 'pointer', popup: false });
+    await click('#nchatWd'); assert.equal(openedWorkdirs, 1, 'the workspace label opens its folder and offers no folder change');
+    await click('.nchat-head-action[data-chat-open-location]'); assert.equal(openedWorkdirs, 2, 'the header retains explicit folder access');
     await click('#nchatMeta'); await popup('.nctx-pop'); await click('#nchatMeta');
-    report.cases.push('Narrow-column permission, model, add and context controls remain clickable; workspace is a static non-focusable label with no open/change action, while the independent header still opens its original location.');
+    report.cases.push('Narrow-column permission, model, add and context controls remain clickable; the workspace label opens its folder without offering a folder change, and the independent header still opens ital location.');
     await drag(.7); check(await geometry()); await drag(.3); check(await geometry());
     // A real Markdown document gives us a persistent scrollable preview. Only
     // the artifact read boundary is stubbed; rendering and resizing are production.

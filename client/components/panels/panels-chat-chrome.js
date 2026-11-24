@@ -49,8 +49,8 @@
             '<button type="button" role="menuitem" data-chat-cloud hidden>' + (global.ChatCloudHandoff?.ICON || ICONS.pane) + '<span>云端会话</span></button>' +
           '</div></div>') + '</div>' +
       '<div class="nchat-head-actions">' +
-        '<button type="button" class="nchat-head-action" data-chat-open-location title="打开当前工作位置">' +
-          ICONS.folder + '<span>打开位置</span></button>' +
+        '<button type="button" class="nchat-head-action" data-chat-open-location title="打开工作根目录">' +
+          ICONS.folder + '<span>打开文件夹</span></button>' +
         '<button type="button" class="nchat-head-icon" data-chat-summary aria-expanded="false" aria-controls="nchatSummary" aria-label="切换成果摘要面板" title="切换成果摘要面板">' +
           ICONS.summary + '<i data-chat-result-count></i></button>' +
         '<button type="button" class="nchat-head-icon" data-chat-pane aria-pressed="false" title="显示成果承载区">' +
@@ -158,7 +158,7 @@
     const context = typeof getContext === 'function' ? getContext() : null;
     global.ChatCloudHandoff?.sync(root, context?.snapshot, context);
     const titleNode = root.querySelector('#nchatTitle');
-    const location = root.querySelector('[data-chat-open-location]');
+    const location = root.querySelector('.nchat-head-action[data-chat-open-location]');
     const summary = root.querySelector('[data-chat-summary]');
     const pane = root.querySelector('[data-chat-pane]');
     const pop = root.querySelector('[data-chat-summary-pop]');
@@ -167,7 +167,14 @@
     if (titleNode) { titleNode.toggleAttribute('data-user-content', !!sessionId || !!pendingHistory || title !== '新对话'); if (titleNode.textContent !== title) titleNode.textContent = title; if (titleNode.title !== title) titleNode.title = title; }
     if (menuButton) { menuButton.disabled = !sessionId; menuButton.setAttribute('aria-expanded', String(titleMenuOpen)); }
     if (titleMenu) titleMenu.hidden = !titleMenuOpen;
-    if (location) location.title = workspace.dir ? ('打开 ' + workspace.dir) : '打开当前工作位置';
+    if (location) {
+      // Before a conversation creates its folder, the handler opens the work root.
+      const template = global.SoduWorkI18n?.t
+        ? global.SoduWorkI18n.t('打开工作区文件夹：{value1}', '打开工作区文件夹：{value1}', { value1: workspace.dir })
+        : '打开工作区文件夹：{value1}';
+      const next = workspace.dir ? template.replace('{value1}', workspace.dir) : '打开工作根目录';
+      if (location.title !== next) location.title = next;
+    }
     if (summary) {
       summary.classList.toggle('active', summaryOpen);
       summary.setAttribute('aria-expanded', String(summaryOpen));

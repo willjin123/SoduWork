@@ -25,7 +25,44 @@
     screenshot: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3"/><rect x="7" y="7" width="10" height="10" rx="1"/></svg>',
     mic: '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
     plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+    // Stacked folders mark a project, a group of folders, apart from one folder.
+    project: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h3.2l1.6 1.6H18a2 2 0 0 1 2 2"/><path d="M3 10a2 2 0 0 1 2-2h3.6l1.8 1.8H17a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+    cloud: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.25 18.5H6.5a4 4 0 1 1 .2-8 5.75 5.75 0 0 1 11.2-1.75A4.9 4.9 0 0 1 17 18.5Z"/></svg>',
   });
+
+  const folderName = dir => String(dir || '').split(/[\\/]/).filter(Boolean).pop() || String(dir || '');
+  // Windows paths compare without case or separator differences; others compare exactly.
+  const pathKey = dir => {
+    const text = String(dir || '').trim().replace(/[\\/]+$/, '');
+    return /^[a-z]:|^\\\\/i.test(text) ? text.replace(/\//g, '\\').toLowerCase() : text;
+  };
+  const translate = (source, params) => {
+    const value = global.SoduWorkI18n?.t ? global.SoduWorkI18n.t(source, source, params) : source;
+    return String(value).replace(/\{(\w+)\}/g, (all, name) => params && Object.hasOwn(params, name) ? String(params[name]) : all);
+  };
+  /*
+   * One description of where a conversation works, shared by every entry point.
+   * The label names the project only when the working folder belongs to it, so
+   * a conversation moved into a project never claims the project's folders.
+   */
+  function workspaceLocation(options) {
+    const o = options || {};
+    const dir = String(o.dir || '').trim();
+    if (o.remoteLabel) return { kind: 'cloud', icon: 'cloud', label: String(o.remoteLabel), tooltip: dir || String(o.remoteLabel), user: false };
+    if (!dir) {
+      return { kind: 'pending', icon: 'folder', label: String(o.pendingLabel || '默认工作区'),
+        tooltip: '本次会话会在工作根目录的 temp 下创建独立文件夹', user: false };
+    }
+    const project = o.project && o.project.name ? o.project : null;
+    const owned = !!project && (project.folders || []).some(folder => pathKey(folder) === pathKey(dir));
+    if (owned) {
+      return { kind: 'project', icon: 'project', label: String(project.name),
+        tooltip: String(project.name) + '\n' + translate('工作文件夹：{value1}', { value1: dir }), user: true };
+    }
+    const outside = project ? '\n' + translate('所属项目：{value1}（工作文件夹不在项目中）', { value1: project.name }) : '';
+    if (o.defaultWorkspace) return { kind: 'default', icon: 'folder', label: '默认工作区', tooltip: dir + outside, user: false };
+    return { kind: 'folder', icon: 'folder', label: folderName(dir), tooltip: dir + outside, user: true };
+  }
 
   function html(options) {
     const o = options || {};
@@ -54,6 +91,8 @@
     const icon = String(o.iconHtml || '') || ICONS[o.icon] || '';
     const tag = o.readOnly ? 'span' : 'button';
     return '<' + tag + ' class="wc-context-button' + (o.readOnly ? ' wc-context-static' : '') + (o.muted ? ' muted' : '') + '" id="' + esc(o.id) + '"' +
+      // Opens the existing folder through the header's handler; it never selects another folder.
+      (o.openLocation && !o.readOnly ? ' type="button" data-chat-open-location' : '') +
       (o.popup ? ' aria-haspopup="true" aria-expanded="false"' : '') +
       ' aria-label="' + esc(o.title || o.value || o.label || '') + '" title="' + esc(o.title || '') + '">' +
       icon + '<span class="wc-context-copy"><i>' + esc(o.label || '') + '</i><b id="' + esc(o.valueId || '') + '">' +
@@ -431,7 +470,7 @@
       contextButton({ id: 'nchatMode', valueId: 'nchatModeName', icon: 'shield',
         label: '权限', value: '兼容权限', title: '本次会话权限', popup: true, chevron: false }) +
       contextButton({ id: 'nchatWd', valueId: 'nchatWdName', icon: 'folder',
-        label: '工作位置', value: '准备工作区', title: '工作位置', readOnly: true }) +
+        label: '工作位置', value: '默认工作区', title: '工作位置', openLocation: true }) +
       contextButton({ id: 'nchatAbility', valueId: 'nchatAbilityName', icon: 'ability',
         label: '能力', value: '基础对话', title: '能力在会话开始时确定', muted: true }) + '</div>';
     const next = replace(node, {
@@ -533,7 +572,7 @@
 
   global.WorkComposer = { html, replace, upgradeChat, contextButton, permissionLabel, permissionAppearance, syntaxHint, executionMode, syncExecutionMenu, closeExecutionMenu,
     openPlugins, pluginSection, pluginRows, loadMenuPlugins, peekMenuPlugins, menuPluginRevision,
-    bindMoreKeyboard, screenshotRow, bindScreenshot, placeMore, placeRuntime, bindPlaceholder, icons: ICONS };
+    bindMoreKeyboard, screenshotRow, bindScreenshot, placeMore, placeRuntime, bindPlaceholder, workspaceLocation, icons: ICONS };
   global.addEventListener('resize', () => {
     document.querySelectorAll('.cp-runtime-pop.show').forEach(popup =>
       placeRuntime(popup.parentElement.querySelector('#cpRuntime'), popup));
