@@ -739,6 +739,11 @@ class AcpBridge:
         self.transition.resumable = bool(capabilities.get("loadSession") or
             (capabilities.get("sessionCapabilities") or {}).get("resume") is not None)
         session_params = {"cwd": self.cwd, "mcpServers": []}
+        # ACP additional workspace roots: sent only when the agent declares support,
+        # always as the full list (resume and load replace earlier roots).
+        extra = self.access.extra_roots() if self.access.enabled else []
+        if extra and (capabilities.get("sessionCapabilities") or {}).get("additionalDirectories") is not None:
+            session_params["additionalDirectories"] = extra
         session_config = {}
         if self.session_id:
             session_caps = capabilities.get("sessionCapabilities") or {}

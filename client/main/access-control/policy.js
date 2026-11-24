@@ -22,6 +22,26 @@ function within(root, target) {
   const relative = path.relative(root, target);
   return !relative || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith('..' + path.sep));
 }
+const MAX_ROOTS = 10;
+/*
+ * Extra folders a conversation may use like its workspace. Only existing absolute
+ * directories survive; a folder inside the workspace or inside another root adds
+ * nothing. Missing folders are dropped, never an error, so restoring a session
+ * after a drive is unplugged only narrows access.
+ */
+function additionalRoots(values, workspaceRoot) {
+  const list = [];
+  for (const value of Array.isArray(values) ? values.slice(0, MAX_ROOTS * 3) : []) {
+    if (typeof value !== 'string' || !path.isAbsolute(value) || value.includes('\0')) continue;
+    let root;
+    try { root = canonical(value); if (!fs.statSync(root).isDirectory()) continue; } catch { continue; }
+    if (within(workspaceRoot, root) || list.some(item => within(item, root))) continue;
+    for (let i = list.length - 1; i >= 0; i--) if (within(root, list[i])) list.splice(i, 1);
+    list.push(root);
+    if (list.length >= MAX_ROOTS) break;
+  }
+  return list;
+}
 function normalize(value, cwd) {
   if (value == null) return null; // Historic full/work is never upgraded to new full access.
   if (value.schema !== SCHEMA || !MODES.has(value.mode) || !Number.isSafeInteger(value.revision) || value.revision < 1) {
@@ -30,21 +50,36 @@ function normalize(value, cwd) {
   if (!path.isAbsolute(value.workspaceRoot || '')) throw new Error('Access policy requires an absolute workspace');
   const root = canonical(value.workspaceRoot);
   if (cwd && !within(root, canonical(cwd)) || cwd && !within(canonical(cwd), root)) throw new Error('Access policy workspace mismatch');
-  return Object.freeze({ schema: SCHEMA, mode: value.mode, revision: value.revision, workspaceRoot: root });
+  const extra = additionalRoots(value.additionalRoots, root);
+  // Without extra folders the policy keeps its original shape.
+  return Object.freeze({ schema: SCHEMA, mode: value.mode, revision: value.revision, workspaceRoot: root,
+    ...(extra.length ? { additionalRoots: Object.freeze(extra) } : {}) });
 }
-function create(mode, cwd) { return normalize({ schema: SCHEMA, mode, revision: 1, workspaceRoot: path.resolve(cwd) }, cwd); }
-function next(mode, cwd, current, expectedRevision) {
+function create(mode, cwd, roots = []) {
+  return normalize({ schema: SCHEMA, mode, revision: 1, workspaceRoot: path.resolve(cwd), additionalRoots: roots }, cwd);
+}
+// A mode change keeps the current extra folders unless new ones are given.
+function next(mode, cwd, current, expectedRevision, roots = current?.additionalRoots || []) {
   const revision = current?.revision || 0;
   if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== revision) throw new Error('权限状态已变化，请重新选择');
-  return normalize({ schema: SCHEMA, mode, revision: revision + 1, workspaceRoot: path.resolve(cwd) }, cwd);
+  return normalize({ schema: SCHEMA, mode, revision: revision + 1, workspaceRoot: path.resolve(cwd), additionalRoots: roots }, cwd);
 }
+function roots(policy) { return [policy.workspaceRoot, ...(policy.additionalRoots || [])]; }
+function withinRoots(policy, target) { return roots(policy).some(root => within(root, target)); }
 function restore(value, cwd) {
   // Access policy is part of the session's durable history. Reopening a
   // session must recreate the policy that was active when it was closed.
   return normalize(value, cwd);
 }
+// A conversation whose saved folder no longer exists reopens in the fallback folder the
+// main process chose; its saved policy moves with it instead of failing to open (#1327).
+function rebase(value, cwd) {
+  if (!value || !cwd || typeof value.workspaceRoot !== 'string' || !path.isAbsolute(value.workspaceRoot)) return value;
+  if (canonical(value.workspaceRoot) === canonical(cwd) || fs.existsSync(value.workspaceRoot)) return value;
+  return { ...value, workspaceRoot: path.resolve(cwd) };
+}
 function restoreState(value, pendingValue, cwd) {
-  const original = normalize(value, cwd), pending = normalize(pendingValue, cwd);
+  const original = normalize(rebase(value, cwd), cwd), pending = normalize(rebase(pendingValue, cwd), cwd);
   const accessPolicy = restore(original, cwd);
   let nextAccessPolicy = pending && pending.revision > (original?.revision || 0) ? restore(pending, cwd) : null;
   // Preserve a newer pending choice without rewriting revisions during
@@ -69,7 +104,7 @@ function queryTargets(policy, args, cwd, readScope) {
     return targets.map(item => {
       // Shell paths are literal: @file is not a Pi read-tool alias.
       const source = path.resolve(cwd, normalizeToolPath(item.path, false)), target = canonical(source);
-      const workspaceRead = !readScope?.contains(source, target) && within(policy.workspaceRoot, target) && !protectedPath(source, false) && !protectedPath(target, false);
+      const workspaceRead = !readScope?.contains(source, target) && withinRoots(policy, target) && !protectedPath(source, false) && !protectedPath(target, false);
       if (!workspaceRead && !readScope?.allows(source, target)) throw Error('scope');
       if (item.kind === 'file' && !fs.statSync(target).isFile()) throw Error('file');
       if (item.kind === 'directory' && !fs.statSync(target).isDirectory()) throw Error('directory');
@@ -129,7 +164,7 @@ function operation(policy, name, args, cwd = policy.workspaceRoot, readScope) {
     const resourceRead = readScope.allows(source, target);
     return { ...details, verdict: resourceRead ? 'allow' : 'ask', resourceRead };
   }
-  if ((fileRead || fileWrite) && within(policy.workspaceRoot, target) && !protectedPath(source, fileWrite) && !protectedPath(target, fileWrite)) return { ...details, verdict: 'allow' };
+  if ((fileRead || fileWrite) && withinRoots(policy, target) && !protectedPath(source, fileWrite) && !protectedPath(target, fileWrite)) return { ...details, verdict: 'allow' };
   if (name === 'bash' && policy.mode === 'standard') {
     const commandTargets = queryTargets(policy, args, cwd, readScope);
     if (commandTargets) return { ...details, commandTargets, verdict: 'allow' };
@@ -142,4 +177,4 @@ function current(policy, previous, cwd = policy.workspaceRoot, readScope) {
   const latest = operation(policy, previous.tool, previous.arguments, cwd, readScope);
   return latest.source === previous.source && latest.target === previous.target && (!previous.resourceRead || latest.verdict === 'allow');
 }
-module.exports = { SCHEMA, MODES, canonical, within, protectedPath, normalize, create, next, restore, restoreState, operation, current };
+module.exports = { SCHEMA, MODES, MAX_ROOTS, canonical, within, withinRoots, roots, additionalRoots, protectedPath, normalize, create, next, restore, restoreState, operation, current };

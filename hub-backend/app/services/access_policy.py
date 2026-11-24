@@ -26,6 +26,37 @@ class UnsupportedPolicyError(PolicyError):
     code = "ACCESS_POLICY_UNSUPPORTED"
 
 
+MAX_ROOTS = 10
+
+
+def _inside(root: str, target: str) -> bool:
+    try:
+        return os.path.normcase(os.path.commonpath((root, target))) == os.path.normcase(root)
+    except ValueError:
+        return False
+
+
+def additional_roots(values, workspace_root: str) -> list[str]:
+    """Extra folders a conversation may use like its workspace.
+
+    The desktop grants only folders the user chose through a native dialog; this
+    side keeps existing absolute directories, drops nested or duplicate entries
+    and missing folders, and never widens beyond ten roots.
+    """
+    result: list[str] = []
+    for value in (values if isinstance(values, list) else [])[:MAX_ROOTS * 3]:
+        if not isinstance(value, str) or not os.path.isabs(value) or "\0" in value:
+            continue
+        root = os.path.realpath(os.path.abspath(value))
+        if not os.path.isdir(root) or _inside(workspace_root, root) or any(_inside(item, root) for item in result):
+            continue
+        result = [item for item in result if not _inside(root, item)]
+        result.append(root)
+        if len(result) >= MAX_ROOTS:
+            break
+    return result
+
+
 def normalize(value, workspace: str = "") -> dict | None:
     if value is None:
         return None
@@ -43,6 +74,10 @@ def normalize(value, workspace: str = "") -> dict | None:
         raise PolicyError("Access policy workspace does not match the execution workspace")
     policy = {"schema": SCHEMA, "mode": mode, "revision": revision,
               "workspaceRoot": root}
+    extra = additional_roots(value.get("additionalRoots"), root)
+    # Without extra folders the policy keeps its original shape and hash.
+    if extra:
+        policy["additionalRoots"] = extra
     # Session identity is assigned by the trusted desktop/Hub route, never by
     # agent output. No arbitrary policy fields become process environment.
     if value.get("sessionId"):

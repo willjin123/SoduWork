@@ -54,4 +54,40 @@ function changeHandler({ session, BrowserWindow, confirmFullAccess = require('./
     finally { changing.delete(ref); }
   };
 }
-module.exports = { answerHandler, changeHandler };
+/*
+ * Replace a conversation's extra folders through the same next-policy path as a
+ * permission change. The renderer proposes folders; only those the account chose
+ * through a native dialog are kept. The mode never changes here.
+ */
+function rootsHandler({ session, registry }) {
+  const changing = new Set();
+  return async (event, ref, dirs, expectedRevision) => {
+    const handle = session.get(ref);
+    const owner = () => handle && event?.sender && handle.attachedWindow?.webContents &&
+      session.get(ref) === handle && handle.attachedWindow.webContents.id === event.sender.id;
+    if (!owner()) return { ok: false, reason: '请在当前会话窗口修改文件夹' };
+    if (changing.has(ref)) return { ok: false, reason: '正在更新文件夹，请稍候' };
+    changing.add(ref);
+    try {
+      const snapshot = handle.snapshot();
+      const current = snapshot.nextAccessPolicy || snapshot.accessPolicy;
+      if (!current || !snapshot.accessControl?.supported || !snapshot.accessControl?.canChangeDuringSession ||
+          typeof handle.setAccessPolicy !== 'function') return { ok: false, unsupported: true, reason: '此 Agent 只使用工作文件夹' };
+      const rules = require('./policy');
+      const granted = await registry.granted(Array.isArray(dirs) ? dirs : []);
+      const wanted = rules.additionalRoots(granted, current.workspaceRoot);
+      const same = (current.additionalRoots || []).length === wanted.length &&
+        wanted.every((root, i) => root === current.additionalRoots[i]);
+      if (same) return { ok: true, unchanged: true, additionalRoots: wanted };
+      if (!owner()) return { ok: false, reason: '会话窗口已变化，请重试' };
+      const policy = rules.next(current.mode, handle.cwd, current, expectedRevision, wanted);
+      const result = await handle.setAccessPolicy(policy, expectedRevision);
+      if (!result?.ok) return result && { ...result, reason: require('./errors').message(result.reason) };
+      const latest = handle.snapshot();
+      return { ...result, additionalRoots: wanted, accessPolicy: latest.accessPolicy || null,
+        nextAccessPolicy: latest.nextAccessPolicy || null, snapshot: latest };
+    } catch (error) { return { ok: false, reason: require('./errors').message(error?.message || error) }; }
+    finally { changing.delete(ref); }
+  };
+}
+module.exports = { answerHandler, changeHandler, rootsHandler };

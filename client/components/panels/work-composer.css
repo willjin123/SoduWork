@@ -180,6 +180,19 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .wc-pop-row span{display:flex;flex-direction:column;min-width:0}.wc-pop-row b{font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:500}
 .wc-pop-row i{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 10.5px);color:var(--ink-5);line-height:1.45}
 .wc-pop-row .wc-check{margin-left:auto;color:var(--accent)}
+/* Workspace picker: project and recent groups between the default and "other folder" rows. */
+#cpWorkspacePop .wc-pop-row:not(.on) .wc-check{visibility:hidden}
+#cpWorkspacePop{max-height:min(520px,calc(100vh - 160px));overflow-y:auto}
+.cp-workspace-heading{padding-top:9px}
+.cp-workspace-sub{padding-left:34px;min-height:36px}
+.wc-pop-row i[data-user-content],.cp-workspace-sub b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-workspace-item{position:relative}
+.cp-workspace-item>.wc-pop-row{padding-right:58px}
+.cp-workspace-forget{appearance:none;position:absolute;right:30px;top:50%;transform:translateY(-50%);width:24px;height:24px;
+  border:0;border-radius:6px;background:transparent;color:var(--ink-4);font:inherit;cursor:pointer;opacity:0}
+.cp-workspace-item:hover .cp-workspace-forget,.cp-workspace-forget:focus-visible{opacity:1}
+.cp-workspace-forget:hover{background:var(--bg-1);color:var(--ink-2)}
+@media(hover:none){.cp-workspace-forget{opacity:1}}
 .wc-cap-pop{width:min(480px,calc(100vw - 48px))}
 .wc-cap-pop .cp-caplist{display:flex;flex-direction:column;align-items:stretch;gap:2px}
 .wc-cap-pop .cp-cap{appearance:none;width:100%;min-height:54px;box-sizing:border-box;display:grid;
@@ -548,3 +561,27 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 @media (max-width:640px){
   .compose-panel .cp-recs{width:calc(100% - 32px)}
 }
+/* Working-location popover of an open conversation (#1327). */
+.cwp-pop{position:fixed;z-index:120;overflow-y:auto;display:block}
+.cwp-pop .wc-pop-title.cwp-section{margin-top:6px;border-top:1px solid var(--line);padding-top:10px}
+.cwp-folder,.cwp-project{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:9px;color:var(--ink-3)}
+.cwp-folder:hover,.cwp-project:hover{background:var(--bg-1)}
+.cwp-folder>svg,.cwp-project>svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.cwp-copy{flex:1;min-width:0;display:flex;flex-direction:column}
+.cwp-line{display:flex;align-items:center;gap:6px;min-width:0}
+.cwp-line>b,.cwp-project>b{font-weight:500;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.cwp-project>b{flex:1}
+.cwp-copy>small{color:var(--ink-5);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:max(var(--font-min-readable, 14.5px), 11px)}
+.cwp-tag{flex:none;padding:0 6px;border-radius:999px;background:var(--bg-2);color:var(--ink-4);white-space:nowrap;
+  font-size:max(var(--font-min-readable, 14.5px), 11px);line-height:1.6}
+.cwp-tag.is-warn{background:color-mix(in srgb,var(--warn,#b25e09) 12%,var(--bg-0));color:var(--warn,#b25e09)}
+.cwp-action{appearance:none;flex:none;border:0;border-radius:6px;background:transparent;color:var(--ink-4);font:inherit;cursor:pointer;
+  padding:2px 7px;font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.cwp-action:hover:not(:disabled),.cwp-action:focus-visible{background:var(--bg-2);color:var(--ink-2)}
+.cwp-action:disabled{opacity:.45;cursor:default}
+.cwp-action.cwp-add{display:block;width:100%;text-align:left;padding:7px 9px 7px 34px;color:var(--ink-3)}
+.cwp-note{margin:2px 9px 6px 34px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.cwp-muted{flex:1;color:var(--ink-4)}
+/* Extra folders show as a quiet "+N" after the workspace name; an unavailable folder warns. */
+#nchatWdName[data-extra-count]::after{content:" " attr(data-extra-count);color:var(--ink-4);font-weight:500}
+#nchatWd[data-location-warning] svg{color:var(--warn,#b66a13)}

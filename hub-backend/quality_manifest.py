@@ -419,6 +419,7 @@ RELEASE_SMOKES = tuple(sorted((
     "test_skill_studio.py",
     "test_handoff_target_diagnostics.py",
     "test_acp_other_permissions.py",
+    "test_access_additional_roots.py",
     "test_codex_account_acp.py",
     "test_codex_acp_outcome.py",
     "test_dsh_access_policy.py",

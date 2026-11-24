@@ -49,6 +49,7 @@ function openReply(app, handle, extra) {
   return {
     ...ui, ...(extra || {}), ok: true,
     ref: handle.ref, cwd: handle.cwd, workspaceName: path.basename(handle.cwd || ''),
+    workspaceUnavailable: String(handle.workspaceUnavailable || ''),
     sessionId: handle.sessionId, title: row ? row.title : (ui.title || ''),
     adapterId: handle.adapterId || snapshot.adapterId || 'pi',
     displayName: snapshot.displayName || handle.displayName || 'Pi',

@@ -33,7 +33,7 @@ function install(session, value, cwd, changed, { readScope = () => undefined } =
     if (!executing.size) { for (const resolve of waiters) resolve(); waiters.clear(); }
   });
   const broker = createBroker({ policy, onChange: changed });
-  const queries = require("./query-execution").create(cwd, policy, policies, readScope);
+  const queries = require("./query-execution").create(cwd, () => policy, policies, readScope);
   session.agent.beforeToolCall = async (context, signal) => {
     if (suspended) return blockForChange(context);
     // Preserve existing hooks and their denials before showing a request.

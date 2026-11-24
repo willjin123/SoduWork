@@ -9,10 +9,10 @@ import uuid
 from urllib.parse import urlsplit
 
 try:
-    from .access_scope import automatic_path, automatic_query, trusted_program, query_execution_args
+    from .access_scope import automatic_path, automatic_query, inside, trusted_program, query_execution_args
     from .skill_read_scope import ReadScope
 except ImportError:
-    from access_scope import automatic_path, automatic_query, trusted_program, query_execution_args
+    from access_scope import automatic_path, automatic_query, inside, trusted_program, query_execution_args
     from skill_read_scope import ReadScope
 
 
@@ -51,7 +51,8 @@ class BridgeAccess:
                 from .opencode_access import Guard
             except ImportError:
                 from opencode_access import Guard
-            self.opencode_guard = Guard(opencode_permissions(self.mode, selected_resources=bool(self.read_scope.payload())), self.mode)
+            self.opencode_guard = Guard(opencode_permissions(self.mode, selected_resources=bool(self.read_scope.payload()),
+                                                              extra_roots=bool(self.extra_roots())), self.mode)
             return self.opencode_guard.environment(env)
         return env
 
@@ -116,7 +117,18 @@ class BridgeAccess:
         # Its stricter credential exclusions and immutable identity take precedence.
         if self.read_scope.contains(workspace, value):
             return not write and self.read_scope.allows(workspace, value)
-        return automatic_path(workspace, value, write=write)
+        if automatic_path(workspace, value, write=write):
+            return True
+        # Extra folders the desktop granted behave like the workspace, with the same
+        # protected-path rules. Relative paths still resolve against the workspace.
+        if not isinstance(value, str) or not value:
+            return False
+        target = value if os.path.isabs(value) else os.path.join(workspace, value)
+        return any(automatic_path(root, target, write=write) for root in self.extra_roots())
+
+    def extra_roots(self) -> list[str]:
+        roots = self.policy.get("additionalRoots")
+        return [root for root in roots if isinstance(root, str) and root] if isinstance(roots, list) else []
 
     def observe_tool(self, update: dict):
         if self.agent_name in {"codex-harness", "codex", "opencode", "dsh", "kimi"}:
@@ -333,7 +345,8 @@ class BridgeAccess:
                 self.native_reads.pop(call_id, None)
                 file, parent = arguments.get("filepath"), arguments.get("parentDir")
                 if (isinstance(file, str) and isinstance(parent, str)
-                        and self.read_scope.allows(root, file)
+                        and (self.read_scope.allows(root, file) or
+                             any(automatic_path(extra, file) for extra in self.extra_roots()))
                         and os.path.normcase(os.path.abspath(parent)) == os.path.normcase(os.path.dirname(os.path.abspath(file)))
                         and all(isinstance(item, dict) and item.get("path") in (file, parent) for item in locations)):
                     self.native_reads[call_id] = [file]
@@ -372,7 +385,11 @@ class BridgeAccess:
     def terminal_program(self, command, args, cwd, env):
         root = str(self.policy.get("workspaceRoot") or "")
         if (self.mode == "standard" and automatic_query(root, command, args=args, cwd=cwd, env=env, read_scope=self.read_scope)):
-            return trusted_program(command, root)
+            program = trusted_program(command, root)
+            # Extra folders are writable too, so an executable inside one is not trusted.
+            if program and any(inside(extra, program) for extra in self.extra_roots()):
+                return ""
+            return program
         return ""
 
     def terminal_arguments(self, command, args):
@@ -439,10 +456,11 @@ class BridgeAccess:
             raise AccessError("Access policy could not be applied to this execution")
 
 
-def opencode_permissions(mode: str, *, selected_resources=False) -> dict:
+def opencode_permissions(mode: str, *, selected_resources=False, extra_roots=False) -> dict:
     if mode == "readonly":
+        # Reads in selected resources or extra folders reach the bridge, which admits only those paths.
         return {"*": "deny", "read": "ask", "list": "allow", "glob": "allow",
-                "grep": "ask", "external_directory": "ask" if selected_resources else "deny"}
+                "grep": "ask", "external_directory": "ask" if selected_resources or extra_roots else "deny"}
     if mode == "full":
         return {"*": "allow", "question": "deny", "doom_loop": "deny"}
     # File requests return immediately in the bridge for ordinary workspace

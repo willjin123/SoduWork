@@ -8,6 +8,8 @@
     get _isEmptyStalledSnapshot() { return _isEmptyStalledSnapshot; },
     get _rememberConversationSnapshot() { return _rememberConversationSnapshot; },
     get _wd() { return _wd; }, set _wd(value) { _wd = value; },
+    get _syncAccessRoots() { return _syncAccessRoots; }, get _extraFolders() { return _extraFolders; },
+    get _reloadManualFolders() { return _reloadManualFolders; }, get _confirmFolders() { return _confirmFolders; },
     get _sessionCaps() { return _sessionCaps; }, set _sessionCaps(value) { _sessionCaps = value; },
     get _sessionInputs() { return _sessionInputs; }, set _sessionInputs(value) { _sessionInputs = value; },
     get _selectCollabTask() { return _selectCollabTask; },
@@ -397,7 +399,8 @@
     _loadWorkRoot();
     const location = global.WorkComposer?.workspaceLocation
       ? WorkComposer.workspaceLocation({ dir: _wd.dir, remoteLabel: remote ? workspace.name : '',
-        project: remote ? null : _workspaceProject(), defaultWorkspace: _isDefaultWorkspace(_wd.dir) })
+        project: remote ? null : _workspaceProject(), defaultWorkspace: _isDefaultWorkspace(_wd.dir),
+        unavailable: remote ? '' : _wd.unavailable, extraFolders: remote ? [] : _extraFolders() })
       : { icon: 'folder', label: workspace.name || '默认工作区', tooltip: _wd.dir || workspace.name || '', user: false };
     const mark = (node, name, value) => {
       if (value !== null) node.setAttribute?.(name, value); else node.removeAttribute?.(name);
@@ -411,8 +414,12 @@
     const el = document.getElementById('nchatWd');
     if (el) {
       el.title = location.tooltip;
-      el.setAttribute('aria-label', location.label + (_wd.dir ? '，' + _wd.dir : ''));
+      el.setAttribute('aria-label', location.label + (_wd.dir ? '，' + _wd.dir : '') +
+        (location.extraCount ? '，+' + location.extraCount : ''));
       mark(el, 'data-user-attributes', location.user ? 'title aria-label' : null);
+      // "+N" counts the extra folders this conversation can access; the popover lists them.
+      if (wd) mark(wd, 'data-extra-count', location.extraCount ? '+' + location.extraCount : null);
+      mark(el, 'data-location-warning', location.warning ? '' : null);
       const icon = global.WorkComposer?.icons?.[location.icon] && el.querySelector?.('svg');
       if (icon && el.getAttribute?.('data-location-icon') !== location.icon) {
         icon.outerHTML = WorkComposer.icons[location.icon];
@@ -440,23 +447,91 @@
       if (root && root.ok && root.dir) { _workRoot = String(root.dir); _paintBar(); }
     }).catch(() => { _workRootRequested = false; });
   }
+  // Windows paths compare without case or separator differences; other platforms compare exactly.
+  function _pathKey(value) {
+    const text = String(value || '').trim().replace(/[\\/]+$/, '');
+    return /^[a-z]:|^\\\\/i.test(text) ? text.replace(/\//g, '\\').toLowerCase() : text;
+  }
   function _isDefaultWorkspace(dir) {
-    const key = (value) => String(value || '').replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
-    const root = key(_workRoot), target = key(dir);
-    return !!root && !!target && (target === root || target.startsWith(root + '\\temp\\'));
+    const root = _pathKey(_workRoot), target = _pathKey(dir);
+    const sep = /^[a-z]:|^\\\\/i.test(root) ? '\\' : '/';
+    return !!root && !!target && (target === root || target.startsWith(root + sep + 'temp' + sep));
   }
   function _workspaceProject() {
     const shell = global.WorkspaceShell;
     if (!shell) return null;
-    if (_sessionId && typeof shell.projectForChat === 'function') {
-      const owner = shell.projectForChat(_sessionId);
-      if (owner) return owner;
-    }
+    // A started conversation belongs to whatever project holds it now; only a draft uses its entry project.
+    if (_sessionId) return typeof shell.projectForChat === 'function' ? (shell.projectForChat(_sessionId) || null) : null;
     const id = String(_sessionOptions?.sidebarProjectId || '');
     return id && typeof shell.searchProjects === 'function'
       ? (shell.searchProjects().find((project) => project.id === id) || null) : null;
   }
+  // Folders this conversation reaches besides its working folder: the current project's
+  // folders plus the ones added to this conversation. The main process grants only
+  // folders the user chose through a native dialog.
+  let _manualFolders = { id: '', dirs: [], loading: '' };
+  function _loadManualFolders() {
+    const id = String(_sessionId || '');
+    if (!id || _manualFolders.id === id || _manualFolders.loading === id) return;
+    const api = global.soduWorkAPI?.workspaceFolders;
+    if (!api || typeof api.session !== 'function') return;
+    _manualFolders.loading = id;
+    Promise.resolve(api.session(id)).then((reply) => {
+      if (String(_sessionId || '') !== id) return;
+      _manualFolders = { id, dirs: Array.isArray(reply?.folders) ? reply.folders.slice() : [], loading: '' };
+      _paintBar();
+    }).catch(() => { _manualFolders.loading = ''; });
+  }
+  function _extraFolders() {
+    if (_snap?.cloudHandoff && _snap.cloudHandoff.phase !== 'aborted') return [];
+    _loadManualFolders();
+    const key = _pathKey;
+    const own = key(_wd.dir), seen = new Set(own ? [own] : []), result = [];
+    const project = _workspaceProject();
+    const manual = _manualFolders.id === String(_sessionId || '') ? _manualFolders.dirs : [];
+    for (const dir of [...(project?.folders || []), ...manual]) {
+      const k = key(dir);
+      if (dir && !seen.has(k)) { seen.add(k); result.push(String(dir)); }
+    }
+    return result.slice(0, 10);
+  }
   global.addEventListener?.('soduwork-sidebar-projects-changed', () => _paintBar());
+  // Folders whose one-time confirmation the user declined in this window; not asked again.
+  const _declinedFolders = new Set();
+  /*
+   * Before a turn, make the conversation's access policy carry its current extra folders.
+   * Folders saved in projects before the folder registry need one native confirmation.
+   * A failure never blocks the turn: those folders simply stay outside the policy.
+   */
+  async function _confirmFolders(dirs) {
+    const folders = global.soduWorkAPI?.workspaceFolders;
+    if (!dirs.length || !folders || typeof folders.status !== 'function' || typeof folders.confirm !== 'function') return;
+    try {
+      const reply = await folders.status(dirs);
+      const pending = (reply?.folders || []).filter((item) => item.exists && !item.granted && !_declinedFolders.has(item.dir)).map((item) => item.dir);
+      if (!pending.length) return;
+      const answer = await folders.confirm(pending, _workspaceProject()?.name || '');
+      if (!answer?.ok) pending.forEach((dir) => _declinedFolders.add(dir));
+    } catch (_) { /* Unconfirmed folders stay outside the policy. */ }
+  }
+  async function _syncAccessRoots(api, ref) {
+    try {
+      const snapshot = _snap || {};
+      const policy = snapshot.nextAccessPolicy || snapshot.accessPolicy;
+      // Folders on this computer mean nothing to a conversation handed to the cloud or another computer.
+      if (snapshot.cloudHandoff && snapshot.cloudHandoff.phase !== 'aborted') return;
+      if (!api || typeof api.setAccessRoots !== 'function' || !ref || !policy ||
+          !snapshot.accessControl?.supported || !snapshot.accessControl?.canChangeDuringSession) return;
+      const wanted = _extraFolders();
+      await _confirmFolders(wanted);
+      const key = _pathKey;
+      const current = (policy.additionalRoots || []).map(key).sort().join('\n');
+      if (current === wanted.map(key).sort().join('\n')) return;
+      await api.setAccessRoots(ref, wanted, policy.revision);
+    } catch (_) { /* The turn continues with the folders already in its policy. */ }
+  }
+  // The chip popover changes the conversation's own folders, then repaints from the main process.
+  function _reloadManualFolders() { _manualFolders = { id: '', dirs: [], loading: '' }; _paintBar(); }
   function _thinkingStatusHtml(busy) {
     return _chatStatus ? _chatStatus.statusHtml(busy) : '';
   }
@@ -1061,6 +1136,21 @@
     }
   }
   global.NativeChat = {
+    // What the working-location popover shows; folder changes go through the main process.
+    workspaceInfo() {
+      const snapshot = _snap || {};
+      const policy = snapshot.nextAccessPolicy || snapshot.accessPolicy || null;
+      return {
+        sessionId: String(_sessionId || ''), ref: String(_ref || ''), dir: _wd.dir || '', unavailable: _wd.unavailable || '',
+        remote: snapshot.cloudHandoff?.phase === 'committed', project: _workspaceProject(),
+        manual: _manualFolders.id === String(_sessionId || '') ? _manualFolders.dirs.slice() : [],
+        extras: _extraFolders(), policyRoots: (policy?.additionalRoots || []).slice(),
+        readonly: policy?.mode === 'readonly',
+        rootsSupported: !!(policy && snapshot.accessControl?.supported && snapshot.accessControl?.canChangeDuringSession),
+        defaultWorkspace: _isDefaultWorkspace(_wd.dir), busy: _runtimeBusy(),
+      };
+    },
+    reloadWorkspaceFolders() { _reloadManualFolders(); },
     async focusApproval(taskId, approvalId) {
       const id = String(taskId || '');
       await _loadCollabTask(id);

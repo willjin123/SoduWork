@@ -226,8 +226,14 @@ if (typeof electron === 'string') {
     await click('[data-model-name="long-model"]'); await until(`document.querySelector('.nmodel-pop').hidden`);
     await click('#nchatMore'); await popup('#nchatMorePop'); await shot('add-menu'); await click('#nchatMore');
     assert.deepEqual(await js(`(()=>{const e=document.querySelector('#nchatWd');return{tag:e.tagName,tabIndex:e.tabIndex,cursor:getComputedStyle(e).cursor,popup:e.hasAttribute('aria-haspopup')}})()`),
-      { tag: 'BUTTON', tabIndex: 0, cursor: 'pointer', popup: false });
-    await click('#nchatWd'); assert.equal(openedWorkdirs, 1, 'the workspace label opens its folder and offers no folder change');
+      { tag: 'BUTTON', tabIndex: 0, cursor: 'pointer', popup: true });
+    // The label opens a popover of the conversation's folders; it never offers to change the working folder.
+    await click('#nchatWd'); await until(`!!document.querySelector('.cwp-pop .cwp-folder .cwp-action')`); await shot('workspace-popover');
+    assert.equal(await js(`/更换工作文件夹|切换工作文件夹/.test(document.querySelector('.cwp-pop').textContent)`), false);
+    await click('.cwp-pop .cwp-folder .cwp-action');
+    for (let i = 0; i < 40 && openedWorkdirs < 1; i++) await delay(50);
+    assert.equal(openedWorkdirs, 1, 'the popover opens the working folder');
+    await js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}));void 0;`); await until(`!document.querySelector('.cwp-pop')`);
     await click('.nchat-head-action[data-chat-open-location]'); assert.equal(openedWorkdirs, 2, 'the header retains explicit folder access');
     await click('#nchatMeta'); await popup('.nctx-pop'); await click('#nchatMeta');
     report.cases.push('Narrow-column permission, model, add and context controls remain clickable; the workspace label opens its folder without offering a folder change, and the independent header still opens ital location.');

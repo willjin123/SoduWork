@@ -49,6 +49,19 @@
     const o = options || {};
     const dir = String(o.dir || '').trim();
     if (o.remoteLabel) return { kind: 'cloud', icon: 'cloud', label: String(o.remoteLabel), tooltip: dir || String(o.remoteLabel), user: false };
+    const located = workspaceLocationBase(o, dir);
+    // Extra folders are listed in the tooltip and counted on the chip.
+    const extras = (Array.isArray(o.extraFolders) ? o.extraFolders : []).filter(item => item && pathKey(item) !== pathKey(dir));
+    if (extras.length) located.tooltip += '\n' + extras.map(item => translate('附加文件夹：{value1}', { value1: item })).join('\n');
+    located.extraCount = extras.length;
+    if (o.unavailable && located.kind !== 'cloud') {
+      return { ...located, kind: 'unavailable', label: '默认工作区', user: false, warning: true,
+        tooltip: translate('工作文件夹不可用：{value1}', { value1: o.unavailable }) + '\n' +
+          translate('本轮在默认工作区执行：{value1}', { value1: dir }) };
+    }
+    return located;
+  }
+  function workspaceLocationBase(o, dir) {
     if (!dir) {
       return { kind: 'pending', icon: 'folder', label: String(o.pendingLabel || '默认工作区'),
         tooltip: '本次会话会在工作根目录的 temp 下创建独立文件夹', user: false };
@@ -91,8 +104,6 @@
     const icon = String(o.iconHtml || '') || ICONS[o.icon] || '';
     const tag = o.readOnly ? 'span' : 'button';
     return '<' + tag + ' class="wc-context-button' + (o.readOnly ? ' wc-context-static' : '') + (o.muted ? ' muted' : '') + '" id="' + esc(o.id) + '"' +
-      // Opens the existing folder through the header's handler; it never selects another folder.
-      (o.openLocation && !o.readOnly ? ' type="button" data-chat-open-location' : '') +
       (o.popup ? ' aria-haspopup="true" aria-expanded="false"' : '') +
       ' aria-label="' + esc(o.title || o.value || o.label || '') + '" title="' + esc(o.title || '') + '">' +
       icon + '<span class="wc-context-copy"><i>' + esc(o.label || '') + '</i><b id="' + esc(o.valueId || '') + '">' +
@@ -470,7 +481,8 @@
       contextButton({ id: 'nchatMode', valueId: 'nchatModeName', icon: 'shield',
         label: '权限', value: '兼容权限', title: '本次会话权限', popup: true, chevron: false }) +
       contextButton({ id: 'nchatWd', valueId: 'nchatWdName', icon: 'folder',
-        label: '工作位置', value: '默认工作区', title: '工作位置', openLocation: true }) +
+        // The popover shows and opens this conversation's folders; it never changes the working folder.
+        label: '工作位置', value: '默认工作区', title: '工作位置', popup: true, chevron: false }) +
       contextButton({ id: 'nchatAbility', valueId: 'nchatAbilityName', icon: 'ability',
         label: '能力', value: '基础对话', title: '能力在会话开始时确定', muted: true }) + '</div>';
     const next = replace(node, {

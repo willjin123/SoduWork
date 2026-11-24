@@ -32,7 +32,7 @@ test('maintenance permits authenticated reattachment but blocks new and archived
     updateWorkloads: { guard: () => ({ ok: false, maintenance: true }) },
     memories: { assertOwner: () => { if (deniedOwner) throw Error('wrong owner'); } },
     session: { findBySessionId: id => id === 'existing' ? live : null },
-    _bindUsage() {}, _attach(handle) { assert.equal(handle, live); attached++; }, _wire() {},
+    _bindUsage() {}, folderRegistry: { applyAutomation: async (_id, value) => value, touch: async () => false, granted: async () => [] }, _attach(handle) { assert.equal(handle, live); attached++; }, _wire() {},
     BrowserWindow: { fromWebContents: () => ({}) }, _openReply: handle => ({ ok: true, ref: handle.ref }),
   });
   vm.runInContext(handler, context);

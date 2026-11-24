@@ -20,14 +20,14 @@ test('Agent label retains popup semantics without a decorative chevron',()=>{
  assert.match(api.contextButton({id:'permission',popup:true}),/class="wc-chevron"/);
 });
 
-test('existing workspace opens its folder without a picker while the new-draft workspace remains a picker',()=>{
+test('existing workspace opens its folder popover without a chevron while the new-draft workspace remains a picker',()=>{
  const {api}=composer();
- const label=api.contextButton({id:'nchatWd',valueId:'nchatWdName',label:'Work location',value:'saved-folder',openLocation:true});
- assert.match(label,/^<button class="wc-context-button" id="nchatWd" type="button" data-chat-open-location/);
- assert.doesNotMatch(label,/aria-haspopup|wc-chevron/);
- const fixed=api.contextButton({id:'nchatWd',valueId:'nchatWdName',label:'Work location',value:'saved-folder',readOnly:true,openLocation:true});
+ const label=api.contextButton({id:'nchatWd',valueId:'nchatWdName',label:'Work location',value:'saved-folder',popup:true,chevron:false});
+ assert.match(label,/^<button class="wc-context-button" id="nchatWd" aria-haspopup="true" aria-expanded="false"/);
+ assert.doesNotMatch(label,/wc-chevron|data-chat-open-location/);
+ const fixed=api.contextButton({id:'nchatWd',valueId:'nchatWdName',label:'Work location',value:'saved-folder',readOnly:true});
  assert.match(fixed,/^<span class="wc-context-button wc-context-static"/);
- assert.doesNotMatch(fixed,/<button|data-chat-open-location|aria-haspopup/);
+ assert.doesNotMatch(fixed,/<button|aria-haspopup/);
  const picker=api.contextButton({id:'cpWorkspace',label:'Work location',popup:true});
  assert.match(picker,/^<button/);assert.match(picker,/aria-haspopup="true"/);
 });

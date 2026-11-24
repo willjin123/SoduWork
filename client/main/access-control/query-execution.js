@@ -33,14 +33,18 @@ function trustedProgram(name, workspace, canonical, within) {
   }
   return '';
 }
-function create(cwd, policy, policies, readScope = () => undefined) {
+function create(cwd, policyOf, policies, readScope = () => undefined) {
+  // The live policy: extra folders and mode can change between turns.
+  const live = () => typeof policyOf === 'function' ? policyOf() : policyOf;
   const plans = new Map(), wrapped = new WeakSet();
+  // Executables must lie outside every writable folder, including extra conversation folders.
+  const insideWritableRoots = (_workspace, target) => policies.withinRoots ? policies.withinRoots(live(), target) : policies.within(live().workspaceRoot, target);
   function admit(context, operation) {
     const tool = context.context?.tools?.find(item => item.name === context.toolCall.name);
     if (!tool || typeof tool.execute !== 'function') return false;
     const argv = query.words(context.args.command);
     const executable = argv?.[0] === 'pwd' ? 'builtin:pwd'
-      : trustedProgram(argv?.[0], policy.workspaceRoot, policies.canonical, policies.within);
+      : trustedProgram(argv?.[0], live().workspaceRoot, policies.canonical, insideWritableRoots);
     if (!executable) return false;
     if (!wrapped.has(tool)) {
       const previous = tool.execute;
@@ -49,12 +53,12 @@ function create(cwd, policy, policies, readScope = () => undefined) {
         if (!plan) return previous.call(this, id, args, signal, ...rest);
         plans.delete(id);
         if (signal?.aborted || JSON.stringify(args) !== JSON.stringify(plan.operation.arguments) ||
-            !policies.current(policy, plan.operation, cwd, readScope())) throw new Error('Safe query target changed before execution');
+            !policies.current(live(), plan.operation, cwd, readScope())) throw new Error('Safe query target changed before execution');
         if (plan.executable === 'builtin:pwd') return { content: [{ type: 'text', text: cwd }], details: { exitCode: 0 } };
         // Direct argv bypasses login shells, aliases, functions and cwd command
         // lookup. The chosen executable must stay outside the writable workspace.
         const current = policies.canonical(plan.executable);
-        if (current !== plan.executable || policies.within(policy.workspaceRoot, current)) throw new Error('Safe query executable changed');
+        if (current !== plan.executable || insideWritableRoots(live().workspaceRoot, current)) throw new Error('Safe query executable changed');
         return new Promise((resolve, reject) => {
           cp.execFile(plan.executable, query.executionArgs(plan.argv), {
             cwd, windowsHide: true, shell: false, encoding: 'utf8', signal,

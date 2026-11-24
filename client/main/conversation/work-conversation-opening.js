@@ -74,7 +74,9 @@ async function applyPolicy({ app, event, options, resume, work, cwd, automationC
       options: work.accessOptions, context: automationContext, consent: accessConsent, BrowserWindow, confirm: confirmFullAccess });
     if (!allowed.ok) return allowed;
   }
-  options.accessPolicy = require('../access-control/policy').create(options.accessMode, cwd);
+  // additionalRoots were validated against the folder registry by the caller.
+  options.accessPolicy = require('../access-control/policy').create(options.accessMode, cwd,
+    Array.isArray(options.additionalRoots) ? options.additionalRoots : []);
   return { ok: true };
 }
 

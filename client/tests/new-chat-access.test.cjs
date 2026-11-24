@@ -46,7 +46,7 @@ function fixture(options = {}) {
     workDir: () => cwd, attachments: { stage: async () => ({ files: [], warnings: [] }) },
     sessionSpec: require('../main/conversation/session-spec'), _conf: () => ({}), BrowserWindow, confirmFullAccess,
     _entryContextPrompts: () => [], _awaitBounded: options.bounded || (value => value), OPEN_TIMEOUT_MS: 45000,
-    _bindUsage() {}, _attach() {}, _detach() {}, _clearRelease() {}, _wire() {}, _openReply: () => ({ ok: true }),
+    _bindUsage() {}, folderRegistry: { applyAutomation: async (_id, value) => value, touch: async () => false, granted: async () => [] }, _attach() {}, _detach() {}, _clearRelease() {}, _wire() {}, _openReply: () => ({ ok: true }),
     require: name => {
       if (name === '../conversation/history-access') {
         const actual = require(path.join(__dirname, '../main/pi-session', name));

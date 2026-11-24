@@ -1828,7 +1828,8 @@ async function createRunnerHandle(request, defaults, initialSession) {
       const rules = require('../access-control/policy');
       if (state.disposed || state.accessRestorePending || !state.accessControl?.supported || !state.accessControl?.canChangeDuringSession) return { ok: false, reason: '执行机尚未支持会话权限切换，请更新执行机' };
       if (state.accessChangePending) return { ok: false, reason: '正在保存权限，请稍候' };
-      const policy = rules.next(value.mode, cwd, state.nextAccessPolicy || state.accessPolicy, expectedRevision);
+      // Extra folders travel with the requested policy; the main process already validated them.
+      const policy = rules.next(value.mode, cwd, state.nextAccessPolicy || state.accessPolicy, expectedRevision, value.additionalRoots || []);
       if (policy.revision !== value.revision) return { ok: false, reason: '权限状态已变化，请重新选择' };
       state.accessChangeGeneration = (state.accessChangeGeneration || 0) + 1;
       const previousPending = state.nextAccessPolicy;

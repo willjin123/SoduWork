@@ -30,7 +30,7 @@ app.whenReady().then(async()=>{
   for(const name of ['work-composer.js','chat-session-controls.js','chat-cloud-handoff.js'])
     await js(fs.readFileSync(path.join(client,'components/panels',name),'utf8'));
   const source=fs.readFileSync(path.join(client,'components/panels/panels-chat.js'),'utf8'),start=source.indexOf('  function _paintBar()');
-  await js(`window.global=window;window._snap={};window._wd={};window._mode='full';window._sessionCaps=[];
+  await js(`window.global=window;window._snap={};window._wd={};window._mode='full';window._sessionCaps=[];window._sessionId='';window._sessionOptions={};
     window.SoduWorkAPI={taskStorageKey:()=> 'isolated-owner'};
     document.querySelector('#composer').innerHTML=WorkComposer.html({className:'nbox',inputId:'nchatInput',sendId:'nchatSend',
       tools:WorkComposer.executionMode('data-chat-execution'),context:'<div class="wc-context" id="nchatContext">'+
@@ -72,7 +72,8 @@ app.whenReady().then(async()=>{
   }
   await js(`window._snap={};window._wd={dir:'C:/original-work',name:'Original workspace'};paint();
     ChatCloudHandoff.sync(root,_snap,{ref:'view'});void 0;`);
-  assert.equal(await js("document.querySelector('#nchatWdName').textContent"),'Original workspace');
+  // A chosen folder shows its folder name (#1327).
+  assert.equal(await js("document.querySelector('#nchatWdName').textContent"),'original-work');
   assert.equal(await js("document.querySelector('#nchatWd').title"),'C:/original-work');
   report.cases.push({name:'ordinary local workspace remains unchanged',ok:true});report.ok=true;
 }).catch(error=>{report.error=error.stack;}).finally(async()=>{

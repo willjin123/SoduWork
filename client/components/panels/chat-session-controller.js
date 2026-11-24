@@ -129,6 +129,11 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
       const openOptions = chatId
         ? { ...ctx._sessionOptions, chatId, requireTaskBinding: !resumeAsOrdinary && Boolean(ctx._sessionOptions.taskRef) }
         : { ...ctx._sessionOptions };
+      // A new conversation starts with its project's folders; the main process keeps only registered ones.
+      if (!chatId && !openOptions.cloud && typeof ctx._extraFolders === 'function') {
+        await ctx._confirmFolders?.(ctx._extraFolders());
+        openOptions.additionalRoots = ctx._extraFolders();
+      }
       let openTimedOut = false;
       const openPromise = Promise.resolve().then(() => api.open(openOptions));
       // If the main process eventually finishes after the renderer has shown a
@@ -263,7 +268,8 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
         delete ordinaryOptions.requireTaskBinding;
         ctx._sessionOptions = ordinaryOptions;
       }
-      ctx._wd = { dir: got.cwd || '', name: got.workspaceName || ctx._sessionOptions.workspaceLabel || '工作区' };
+      ctx._wd = { dir: got.cwd || '', name: got.workspaceName || ctx._sessionOptions.workspaceLabel || '工作区',
+        unavailable: String(got.workspaceUnavailable || '') };
       ctx._mode = got.mode || ctx._mode;
       ctx._sessionCaps = got.capabilities || ctx._sessionCaps;
       ctx._sessionInputs = got.inputAttachments || ctx._sessionInputs;
@@ -659,6 +665,8 @@ async function _sendCore(textOverride, sendOptions) {
         })),
       });
       const submissionRef = retainedRef || ctx._ref; if (!api || !submissionRef) return false;
+      // Between turns only: a running turn keeps its folders until it finishes.
+      if (!wasRunning && currentSendView()) await ctx._syncAccessRoots?.(api, submissionRef);
       const submissionSnapshot = ctx._snap;
       if (failedDraft.requirement) failedDraft.requirement.deliveryState = 'uncertain';
       const r = await api.send(submissionRef, text, attachmentRefs, {

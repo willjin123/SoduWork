@@ -359,6 +359,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   });
   require('../access-control/preferences').install({ app, ipcMain, BrowserWindow, confirmFullAccess });
   require('../workspace/recent-workspace').install({ app, ipcMain });
+  const folderRegistry = require('../workspace/folder-registry').create({ app, identityOf: sendIdentityOf || identityOf, workRoot: () => workDir(app) });
+  require('../workspace/folder-registry').install({ app, ipcMain, dialog, BrowserWindow, shell, registry: folderRegistry });
   const newChatAccess = require('../access-control/new-chat-consent').create({ BrowserWindow, confirmFullAccess });
   newChatAccess.install(ipcMain);
   const memories = require('../conversation/session-memory').install({ app, ipcMain, dialog, BrowserWindow, identityOf });
@@ -374,7 +376,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     managedInputsRoot: () => path.join(workDir(app), 'temp'),
   });
   require('./environment-ipc').install({
-    app, ipcMain, session, identityOf, capabilityGrantsOf, _skillDirs, workDir, _saveConf, _conf,
+    app, ipcMain, session, identityOf, capabilityGrantsOf, _skillDirs, workDir, _saveConf, _conf, folderRegistry,
   });
   const historyActions = require('./history-ipc').install({ app, ipcMain, session, BrowserWindow, dialog, shell,
     cloudHistory: _cloudHandoff, accountHistory: _accountSync, sharedHistory: _sharedHistory });
@@ -413,6 +415,12 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     // empty value deliberately follows the selected runtime's normal model
     // resolution; never inherit the last model from the ordinary composer.
     delete opts.appRequestId;
+    // An automation bound to a project runs with that project's folders (#1327).
+    if (!opts.chatId && opts.automationScheduleId) {
+      try { Object.assign(opts, await folderRegistry.applyAutomation(String(opts.automationScheduleId), opts)); }
+      catch (_) { /* The automation runs with its own folder only. */ }
+    }
+    delete opts.automationScheduleId;
     let accessConsent = null;
     try {
       const historyAccess = require('../conversation/history-access');
@@ -746,6 +754,12 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       const cwd = resume
         ? require('./resume-cwd')(app, resume, _defaultCwd)
         : _newSessionCwd(app, ref, opts);
+      // A resumed conversation whose folder is gone runs in the default workspace; say so.
+      const archivedCwd = resume && String(resume.cwd || '').trim();
+      const workspaceUnavailable = archivedCwd && path.resolve(archivedCwd) !== path.resolve(cwd) ? archivedCwd : '';
+      if (!resume && opts.cwd) void folderRegistry.touch(cwd).catch(() => {});
+      // Renderer folders are proposals: only folders this account chose natively become roots.
+      opts.additionalRoots = resume ? [] : await folderRegistry.granted(opts.additionalRoots).catch(() => []);
       const permitted = await workOpening.applyPolicy({ app, event, options: opts, resume, work, cwd,
         automationContext, accessConsent, BrowserWindow, confirmFullAccess });
       if (!permitted.ok) { await capabilityPromise.catch(() => {}); return permitted; }
@@ -924,6 +938,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         _wire(BrowserWindow, opened.session);
         _cloudHandoff.observe(opened.session);
         appRequest?.assertActive();
+        opened.session.workspaceUnavailable = workspaceUnavailable;
         const reply = _openReply(opened.session, { resumed: !!resume, seeded: opened.seeded || 0 });
         accessConsent?.commit();
         if (!resume && !opts.sessionTitle && !spec.taskRef && !automationContext && !appRequest &&
@@ -1286,6 +1301,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
 
   ipcMain.handle('pi-session-answer-ui', require('../access-control/ipc').answerHandler(session));
   ipcMain.handle('pi-session-set-access-mode', require('../access-control/ipc').changeHandler({ session, BrowserWindow, confirmFullAccess }));
+  ipcMain.handle('pi-session-set-access-roots', require('../access-control/ipc').rootsHandler({ session, registry: folderRegistry }));
   const goalAction = require('./goal-actions').create({
     session, publish: (s, touched, snapshot) => _publish(BrowserWindow, s, touched, snapshot),
     scheduleRelease: _scheduleRelease,

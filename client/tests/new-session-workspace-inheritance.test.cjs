@@ -222,9 +222,10 @@ test('conversation composer omits the removed workspace-switch action and its pr
   const css = read('components/panels/work-composer.css');
   assert.doesNotMatch(css, /\.wc-wd-pick/);
   assert.doesNotMatch(bindings, /querySelector\('#nchatWd'\)\.addEventListener/);
-  // The label may open the existing directory (#1327) but never changes it.
-  assert.match(composer, /id: 'nchatWd',[\s\S]{0,160}openLocation: true/);
-  assert.doesNotMatch(composer, /id: 'nchatWd',[\s\S]{0,160}popup: true/);
+  // The label opens a popover of this conversation's folders (#1327) but never changes the working folder.
+  assert.match(composer, /id: 'nchatWd',[\s\S]{0,320}popup: true, chevron: false/);
+  const popover = read('components/panels/chat-workspace-popover.js');
+  assert.doesNotMatch(popover, /pi-session-set-cwd|setCwd|_changeConversationWorkspace/);
   assert.match(read('components/panels/panels-chat-chrome.js'), /data-chat-open-location/,
     'the independent header action still opens the existing directory');
 });

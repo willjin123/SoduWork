@@ -46,7 +46,7 @@ function ipcFixture({ app, bridge, owner, cwd, task, legacy = false }) {
     skillTurn: require('../main/pi-session/skill-turn'),
     BrowserWindow: { fromWebContents: () => null }, confirmFullAccess: async () => false,
     _entryContextPrompts: () => [], _awaitBounded: value => value, OPEN_TIMEOUT_MS: 45000,
-    _bindUsage() {}, _attach() {}, _detach() {}, _wire() {}, _cloudHandoff: { observe() {} },
+    _bindUsage() {}, folderRegistry: { applyAutomation: async (_id, value) => value, touch: async () => false, granted: async () => [] }, _attach() {}, _detach() {}, _wire() {}, _cloudHandoff: { observe() {} },
     _openReply: (handle, extra) => openReply(app, handle, extra),
     require: name => {
       const actual = require(path.join(__dirname, '../main/pi-session', name));

@@ -89,7 +89,7 @@ function fixture(t, options = {}) {
       BrowserWindow: { fromWebContents: () => ({}) }, confirmFullAccess: async () => false,
       _entryContextPrompts: () => [], _awaitBounded: value => value, OPEN_TIMEOUT_MS: 45000,
       _sessionOwners: { bind() {}, quarantine() {}, closed() {} },
-      _bindUsage() {}, _attach() {}, _detach() {}, _discardRenderer() {}, _wire() {},
+      _bindUsage() {}, folderRegistry: { applyAutomation: async (_id, value) => value, touch: async () => false, granted: async () => [] }, _attach() {}, _detach() {}, _discardRenderer() {}, _wire() {},
       _openReply: (handle, extra) => ({ ok: true, ...extra, sessionId: handle.sessionId, snapshot: handle.snapshot() }),
       require: name => {
         if (name.startsWith('node:')) return require(name);

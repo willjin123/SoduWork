@@ -58,7 +58,7 @@ function fixture(options = {}) {
       quarantine(handle) { ownerActions.push(['quarantine', handle]); },
       closed(handle, confirmed) { ownerActions.push(['closed', handle, confirmed]); },
     },
-    _bindUsage() {}, _attach() { viewAttachments++; },
+    _bindUsage() {}, folderRegistry: { applyAutomation: async (_id, value) => value, touch: async () => false, granted: async () => [] }, _attach() { viewAttachments++; },
     _detach(handle) { viewDetachments++; return options.detach?.(handle); },
     _discardRenderer(handle) { viewDetachments++; return options.discard?.(handle); },
     _clearRelease() {},
